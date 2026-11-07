@@ -1,0 +1,32 @@
+spring:
+  config:
+    import: optional:file:./.env[.properties]
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+management:
+  endpoints.web.exposure.include: health,info
+  endpoint.health.show-details: never
+server:
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${SESSION_COOKIE_SECURE:false}
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${PORT:8080}
+contextiq:
+  auth:
+    google-enabled: ${GOOGLE_LOGIN_ENABLED:false}
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}

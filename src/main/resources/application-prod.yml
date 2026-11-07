@@ -1,0 +1,7 @@
+# Credentials and allowed frontend origin must be supplied by the deployment.
+contextiq:
+  frontend-url: ${FRONTEND_URL}
+server:
+  error:
+    include-message: never
+    include-stacktrace: never

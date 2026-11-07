@@ -1,0 +1,112 @@
+# ContextIQ — Phase 0
+
+An enterprise knowledge platform foundation with a persistent mock assistant. No LLM API key is needed. Account authentication is implemented with email/password and optional Google login. See [authentication setup](docs/authentication.md) for configuration and manual Docker rebuild steps.
+
+## Layout and prerequisites
+
+The original backend remains in `ContextIQ/`: Spring Boot **4.1.2**, Maven wrapper, Java **21**, WAR packaging, group `com.gihan.contextioq`, artifact `ContextIQ`, package `com.gihan.contextioq.ContextIQ`. The application class, servlet initializer, original test, and Maven plugins are retained. The sibling `../ContextIQ-frontend/` contains React, TypeScript, Vite, Tailwind 4, React Router, Axios, TanStack Query and Lucide.
+
+Install JDK 21, Node.js 22.18+ with npm, and Docker Desktop (running). Dependency installation needs internet access. Maven is supplied by `./mvnw`.
+
+## Start the database and backend
+
+From this backend folder:
+
+```sh
+cp .env.example .env # only if .env does not already exist
+# Edit .env: set DB_USERNAME and a strong DB_PASSWORD. Never commit .env.
+docker compose up -d --wait postgres
+./mvnw spring-boot:run
+```
+
+The verified local `.env` uses PostgreSQL host port **5433** because 5432 was already occupied (the example defaults remain 5432). A generated local `.env` may already exist from verification; keep it private. Spring imports the optional `.env` in the working directory as a Java properties file. For IntelliJ launches, set the working directory to this backend folder. Use plain `KEY=value` entries without surrounding quotes or `export`; quotes become part of the value in Java properties. Environment variables override values from the file, and deployments can omit it entirely. `DB_URL` must start with `jdbc:postgresql://` (for example, `jdbc:postgresql://localhost:5433/contextiq`). Backend: http://localhost:8080. It binds to loopback by default. Compose stores data in the named `contextiq-data` volume. `docker compose down` preserves data; `down -v` destroys it and should only be used deliberately.
+
+Flyway runs the versioned migrations in `src/main/resources/db/migration/` before JPA initialization. Hibernate uses `ddl-auto=validate`, including in tests. Add new versioned migrations for schema changes; never edit migrations already applied to a database. UTC `Instant` timestamps use PostgreSQL `TIMESTAMP WITH TIME ZONE` (equivalent to TIMESTAMPTZ).
+
+## Run backend and PostgreSQL together in Docker
+
+Start Docker Desktop, then run from this backend folder:
+
+```sh
+# Only create .env if it does not exist, then set DB_USERNAME and DB_PASSWORD.
+cp -n .env.example .env
+docker compose up --build -d
+docker compose logs -f backend
+```
+
+The Dockerfile builds and tests the WAR with Java 21, then runs it in a smaller Java 21 runtime image as a non-root user. `.dockerignore` excludes local credentials and build output. Compose starts PostgreSQL first and waits for its health check before launching Spring Boot. Flyway creates or updates the application tables on startup.
+
+The backend connects to `postgres:5432` over Docker's internal network. This is independent of the host `DB_URL` in `.env`. On your Mac, the API is at `http://localhost:8080` and pgAdmin connects to `localhost` at `DB_PORT` (5433 in the existing local setup). The container binds to `0.0.0.0` internally, while Compose publishes it only on the Mac's loopback interface. The frontend continues to run separately as described below.
+
+Stop an IntelliJ backend before starting the Docker backend, or run `BACKEND_PORT=8081 docker compose up --build -d` to publish the container on a different port. Use `curl http://localhost:8080/actuator/health` to check readiness; `docker compose up -d` alone does not mean Spring Boot has finished starting.
+
+```sh
+docker compose ps                 # Show containers and ports
+docker compose down               # Stop/remove containers; preserve database data
+docker compose up --build -d       # Rebuild after code changes and start again
+```
+
+The `contextiq-data` volume retains database data. Do not add `-v` to `docker compose down` unless you intend to delete that data. Changing credentials in `.env` does not update users in an already initialized PostgreSQL volume.
+
+## Start the frontend
+
+In a second terminal:
+
+```sh
+cd ../ContextIQ-frontend
+npm ci
+cp .env.example .env # optional: the same local API URL is the default
+npm run dev
+```
+
+Open http://localhost:5173. Vite uses strict port 5173, matching the default allowed CORS origin. Public routes: `/login`, `/register`. Protected routes: `/dashboard`, `/chat`, `/documents`, `/workspaces`, `/settings`; `/` redirects to `/dashboard`. A production static host must rewrite these routes to `index.html`.
+
+## Environment
+
+| Variable | Purpose / default |
+| --- | --- |
+| `SPRING_PROFILES_ACTIVE` | Set in the process environment or IntelliJ run configuration: `dev` for local startup, `prod` for deployment preparation. An uppercase entry imported from `.env` does not activate a profile. |
+| `DB_URL` | Required JDBC URL; dev fallback `jdbc:postgresql://localhost:5432/contextiq` |
+| `DB_USERNAME`, `DB_PASSWORD` | Required, no credentials committed; used by Java and Compose |
+| `DB_NAME` | Compose database name, defaults to `contextiq`; update DB_URL if changed |
+| `DB_PORT` | Compose host port, defaults to `5432`; update DB_URL if changed |
+| `FRONTEND_URL` | Exact CORS origin; default `http://localhost:5173`, required in prod |
+| `SERVER_ADDRESS` | Backend bind address, default `127.0.0.1` |
+| `PORT` | Backend port, default `8080` |
+| `GOOGLE_LOGIN_ENABLED` | Defaults to false; enable after configuring credentials |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Server-only Google OAuth web client credentials |
+| `SESSION_COOKIE_SECURE` | false for localhost HTTP; set true on HTTPS deployments |
+| `VITE_API_BASE_URL` | Frontend API root, default `http://localhost:8080/api/v1` |
+
+Never place provider API keys in Vite variables: those values are public browser code. A prod profile alone does not make this development foundation production-ready.
+
+## Checks
+
+```sh
+# Backend: H2 PostgreSQL compatibility mode, actual Flyway migration, schema validation
+./mvnw test
+./mvnw package
+# Frontend
+cd ../ContextIQ-frontend
+npm run typecheck
+npm run build
+```
+
+Backend tests cover context startup, health, mock dashboard, blank/missing inputs, malformed IDs, missing conversations, mock chat, persistence and history reuse. H2 tests do not replace PostgreSQL verification. To verify the full stack, start both services, send a chat message, reload its URL, and confirm history remains. Restart the backend and repeat to verify durable storage. Inspect `/actuator/health` for database readiness; `/api/v1/health` is an application liveness/identity endpoint.
+
+## API routes
+
+- `GET /api/v1/health`
+- `GET /api/v1/dashboard/summary` — explicitly MOCK metrics
+- `POST /api/v1/chat/messages` — persist a user/assistant turn, create conversation if ID omitted
+- `GET /api/v1/chat/conversations`
+- `GET /api/v1/chat/conversations/{id}/messages`
+- `GET /actuator/health` and `/actuator/info`
+
+See [authentication setup and auth API](docs/authentication.md), [API contract](docs/api-contract.md), [architecture](docs/architecture.md), and [roadmap](docs/roadmap.md).
+
+## Limitations and next steps
+
+The mock reply is deterministic and never calls an AI provider. Documents and recent dashboard activity are labeled frontend samples. Dashboard metrics are synthetic, including conversation counts. Upload, retrieval, embeddings, workspace membership, account linking, and agents are deferred. Conversations are private to their owning account. History is unpaginated for Phase 0; add bounded pagination before larger datasets. Sending is transactional, but retries are not idempotent: after an ambiguous timeout, inspect history before retrying. No streaming or token usage yet.
+
+Phase 1 will replace `MockAiChatService` with a server-side Gemini integration through the `AiChatService` boundary, adding streaming, timeouts, usage measurement and provider error handling. Document ingestion and indexing begin in Phase 2. No heavy AI dependency is installed now.
