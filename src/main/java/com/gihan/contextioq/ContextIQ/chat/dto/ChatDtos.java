@@ -13,16 +13,24 @@ public final class ChatDtos {
     @NotBlank @Size(max = 8000) String message,
     UUID conversationId,
     Boolean useDocuments,
-    @Size(max = 50) java.util.List<@NotNull UUID> documentIds
+    @Size(max = 50) java.util.List<@NotNull UUID> documentIds,
+    @Size(max = 50) java.util.List<@NotNull UUID> folderIds
   ) {
+    public SendRequest(String message, UUID conversationId, Boolean useDocuments, java.util.List<UUID> documentIds) { this(message, conversationId, useDocuments, documentIds, null); }
     public SendRequest(String message, UUID conversationId, Boolean useDocuments) { this(message, conversationId, useDocuments, null); }
     public SendRequest { useDocuments = Boolean.TRUE.equals(useDocuments); }
     public SendRequest(String message, UUID conversationId) { this(message, conversationId, false, null); }
   }
 
   public record SelectedDocument(UUID id, String filename, boolean available) {}
-  public record DocumentContext(boolean useDocuments, java.util.List<SelectedDocument> documents) {}
-  public record DocumentSelection(boolean useDocuments, @NotNull @Size(max = 50) java.util.List<@NotNull UUID> documentIds) {}
+  public record SelectedFolder(UUID id, String name, boolean available, long documentCount) {}
+  public record DocumentContext(boolean useDocuments, java.util.List<SelectedDocument> documents, java.util.List<SelectedFolder> folders) {
+    public DocumentContext(boolean useDocuments, java.util.List<SelectedDocument> documents) { this(useDocuments, documents, java.util.List.of()); }
+  }
+  public record DocumentSelection(boolean useDocuments, @NotNull @Size(max = 50) java.util.List<@NotNull UUID> documentIds,
+      @Size(max = 50) java.util.List<@NotNull UUID> folderIds) {
+    public DocumentSelection(boolean useDocuments, java.util.List<UUID> documentIds) { this(useDocuments, documentIds, null); }
+  }
 
   public record ConversationView(
     UUID id,

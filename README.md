@@ -131,3 +131,23 @@ Enable **Search selected documents**, expand **Select documents**, and choose on
 This update adds Flyway **V6**. Apply it by rebuilding/recreating only your backend through your normal Docker workflow (`docker compose up -d --build --force-recreate --no-deps backend` from the backend directory). No database recreation is needed when Phase 3/pgvector is already running. The frontend blocks sending until the backend advertises the new selection capability. No services are restarted automatically by this change.
 
 Selection endpoints: `GET` and `POST /api/v1/chat/conversations/{id}/documents`; see [API contract](docs/api-contract.md). Verify by selecting two files, asking a question, reloading, and expanding the answer's source. Deleting one selected file should leave its unavailable chip; an empty or unavailable-only scope never searches other files.
+
+
+### Folders and the redesigned library
+
+Create folders from **Documents → New folder**, choose one of eight preset vector icons and six muted colors, and save. Select a folder pill to filter; use **Edit folder** to change its name/icon/color. Additional controls filter by file type and filename, or sort by date/name.
+
+Select document checkboxes, choose a destination, and click **Move** (up to 100 files). Choose **Unfiled** to remove a folder assignment. Files live in one folder at a time; moving does not re-embed them. Uploads can be assigned directly to a folder.
+
+In chat, enable **Search knowledge → Choose sources**. **Folders** selects current folder contents; **Individual files** retains explicit-file selection with a folder filter. Both can be combined. Folder selections save with the conversation, and files added to those folders are included in future queries. Earlier evidence snapshots stay unchanged.
+
+Apply Flyway **V7** by rebuilding only the backend:
+
+```sh
+cd /Users/gihanpunarji/Developer/ContextIQ
+docker compose up -d --build --force-recreate --no-deps backend
+```
+
+Refresh the frontend afterwards. No database recreation or model changes are required. Until rebuilt, the current backend cannot serve folder routes; the UI keeps existing documents accessible and disables folder-scoped chat. The implementation does not automatically start/restart services.
+
+Regression tests cover folder validation and ownership, atomic moves, upload assignment, saved chat folders, changing membership and retrieval union/deduplication. The retrieval-scope SQL test substitutes distance arithmetic under H2; it verifies filters and limits, not native pgvector distance calculations. Live PostgreSQL/Ollama verification remains a manual rollout check.

@@ -3,5 +3,9 @@ package com.gihan.contextioq.ContextIQ.document;
 import java.time.Instant;
 import java.util.UUID;
 
-public record DocumentView(UUID id, String filename, long sizeBytes, int chunkCount,
-                           String embeddingModel, Instant createdAt) {}
+public record DocumentView(UUID id, String filename, long sizeBytes, int chunkCount, String embeddingModel,
+                           Instant createdAt, UUID folderId) {
+    public DocumentView(UUID id, String filename, long sizeBytes, int chunkCount, String embeddingModel, Instant createdAt) {
+        this(id, filename, sizeBytes, chunkCount, embeddingModel, createdAt, null);
+    }
+}

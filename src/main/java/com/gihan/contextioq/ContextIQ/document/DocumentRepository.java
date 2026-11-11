@@ -24,14 +24,14 @@ public class DocumentRepository {
         return jdbc.query("SELECT * FROM documents WHERE owner_id = ? ORDER BY created_at DESC, id",
                 (rs, row) -> new DocumentView(rs.getObject("id", UUID.class), rs.getString("filename"),
                         rs.getLong("size_bytes"), rs.getInt("chunk_count"), rs.getString("embedding_model"),
-                        rs.getTimestamp("created_at").toInstant()), owner);
+                        rs.getTimestamp("created_at").toInstant(), rs.getObject("folder_id", UUID.class)), owner);
     }
 
     public DocumentView insert(UUID owner, String name, long size, String model,
                                List<String> chunks, List<float[]> vectors) {
         var id = UUID.randomUUID();
         var now = Instant.now();
-        jdbc.update("INSERT INTO documents VALUES (?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO documents (id, owner_id, filename, size_bytes, chunk_count, embedding_model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 id, owner, name, size, chunks.size(), model, Timestamp.from(now));
         for (int i = 0; i < chunks.size(); i++) {
             jdbc.update("INSERT INTO document_chunks (id, document_id, chunk_index, content, embedding) VALUES (?, ?, ?, ?, CAST(? AS " + vectorType + "))",
@@ -49,10 +49,18 @@ public class DocumentRepository {
     }
 
     public List<Source> search(UUID owner, String model, float[] vector, double threshold, List<UUID> selected) {
-        if (selected != null && selected.isEmpty()) return List.of();
-        String scope = selected == null ? "" : " AND d.id IN (" + String.join(",", Collections.nCopies(selected.size(), "?")) + ")";
+        return search(owner, model, vector, threshold, selected, List.of());
+    }
+
+    public List<Source> search(UUID owner, String model, float[] vector, double threshold, List<UUID> selected, List<UUID> folders) {
+        if (selected != null && selected.isEmpty() && folders.isEmpty()) return List.of();
+        var predicates = new ArrayList<String>();
+        if (selected != null && !selected.isEmpty()) predicates.add("d.id IN (" + String.join(",", Collections.nCopies(selected.size(), "?")) + ")");
+        if (!folders.isEmpty()) predicates.add("d.folder_id IN (" + String.join(",", Collections.nCopies(folders.size(), "?")) + ")");
+        String scope = predicates.isEmpty() ? "" : " AND (" + String.join(" OR ", predicates) + ")";
         var args = new ArrayList<Object>(List.of(EmbeddingService.vectorLiteral(vector), owner, model, EmbeddingService.vectorLiteral(vector), threshold));
         if (selected != null) args.addAll(selected);
+        args.addAll(folders);
         // Ownership is part of the SQL predicate, before ranking/limiting. Never search other accounts.
         return jdbc.query("""
                 SELECT d.id AS document_id, c.id AS chunk_id, d.filename, c.chunk_index, c.content,

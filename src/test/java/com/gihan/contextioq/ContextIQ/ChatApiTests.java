@@ -57,7 +57,7 @@ class ChatApiTests {
     var first = java.util.UUID.randomUUID();
     var second = java.util.UUID.randomUUID();
     for (var doc : java.util.List.of(first, second)) jdbc.update(
-      "INSERT INTO documents VALUES (?, ?, ?, 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, owner, doc + ".txt");
+      "INSERT INTO documents (id, owner_id, filename, size_bytes, chunk_count, embedding_model, created_at) VALUES (?, ?, ?, 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, owner, doc + ".txt");
     String route = "/api/v1/chat/conversations/" + conversation.getId() + "/documents";
     String body = "{\"useDocuments\":true,\"documentIds\":[\"" + first + "\",\"" + second + "\"]}";
     mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
@@ -95,7 +95,7 @@ class ChatApiTests {
       .contentType(MediaType.APPLICATION_JSON).content("{\"useDocuments\":false,\"documentIds\":[]}"))
       .andExpect(status().isNotFound());
     var doc = java.util.UUID.randomUUID();
-    jdbc.update("INSERT INTO documents VALUES (?, ?, 'private.txt', 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, other);
+    jdbc.update("INSERT INTO documents (id, owner_id, filename, size_bytes, chunk_count, embedding_model, created_at) VALUES (?, ?, 'private.txt', 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, other);
     mvc.perform(post("/api/v1/chat/messages").with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
       .contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"Hi\",\"documentIds\":[\"" + doc + "\"]}"))
       .andExpect(status().isNotFound());

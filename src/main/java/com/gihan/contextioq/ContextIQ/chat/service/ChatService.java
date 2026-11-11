@@ -65,7 +65,7 @@ public class ChatService {
                     null,
                     null,
                     List.of(),
-                    selections.resolve(null, owner, request.useDocuments(), request.documentIds())
+                    selections.resolve(null, owner, request.useDocuments(), request.documentIds(), request.folderIds())
             );
             var conversation = conversations
                     .findById(request.conversationId())
@@ -104,7 +104,7 @@ public class ChatService {
                     conversation.getId(),
                     conversation.getUpdatedAt(),
                     List.copyOf(context),
-                    selections.resolve(conversation.getId(), owner, request.useDocuments(), request.documentIds())
+                    selections.resolve(conversation.getId(), owner, request.useDocuments(), request.documentIds(), request.folderIds())
             );
         });
         var input = new ArrayList<>(snapshot.history());
@@ -113,7 +113,8 @@ public class ChatService {
         if (request.useDocuments() && !"OLLAMA".equals(ai.status().mode())) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Document chat requires Ollama. Switch the backend to OLLAMA.");
         }
-        var sources = request.useDocuments() ? retrieval.retrieve(owner, text, snapshot.context().documents().stream().filter(SelectedDocument::available).map(SelectedDocument::id).toList())
+        var sources = request.useDocuments() ? retrieval.retrieve(owner, text, snapshot.context().documents().stream().filter(SelectedDocument::available).map(SelectedDocument::id).toList(),
+                snapshot.context().folders().stream().filter(f -> f.available() && f.documentCount() > 0).map(SelectedFolder::id).toList())
                 : java.util.List.<com.gihan.contextioq.ContextIQ.rag.Source>of();
         AiChatService.Reply reply;
         if (!request.useDocuments()) reply = ai.reply(List.copyOf(input));
@@ -189,7 +190,7 @@ public class ChatService {
     public DocumentContext selectDocuments(UUID id, DocumentSelection request) {
         UUID owner = current.get().getId();
         var c = conversations.findForUpdateById(id, owner).orElseThrow(this::notFound);
-        var context = selections.resolve(id, owner, request.useDocuments(), request.documentIds());
+        var context = selections.resolve(id, owner, request.useDocuments(), request.documentIds(), request.folderIds());
         selections.save(id, context);
         Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         c.touch(now.isAfter(c.getUpdatedAt()) ? now : c.getUpdatedAt().plusNanos(1000));

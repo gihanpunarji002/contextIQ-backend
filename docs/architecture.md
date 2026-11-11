@@ -44,3 +44,12 @@ The pinned Spring AI reader resolves Apache Tika 3.3.1. `contextiq-tika.xml` all
 Flyway V6 adds `conversations.use_documents` and `conversation_documents` (conversation FK, document UUID, filename snapshot, selection order). The document UUID intentionally has no document FK: deletion preserves an unavailable selection rather than silently changing its meaning. Reads join the current account's documents to compute availability. Only owned documents or an existing conversation's tombstones may be saved. Conversation ownership is validated before accessing selections.
 
 Chat snapshots the selected scope before retrieval, searches only those IDs under the existing ownership predicate, and saves selection plus both messages in the final transaction. Selection updates lock and touch the conversation so the existing generation conflict check prevents overwriting a concurrent selection change. External model calls remain outside transactions. Historic answer evidence remains in `message_sources`, independently of current selections and document deletion.
+
+
+### Private document folders
+
+V7 adds `document_folders`, nullable `documents.folder_id`, an owner/folder index and `conversation_folders` snapshots. A composite FK `(folder_id, owner_id)` prevents documents from referencing a different account's folder even below the service layer. The folder service handles validation and atomic bulk moves; icon/color values are fixed enums. Upload keeps embedding outside the database transaction and assigns the chosen folder atomically when storing the indexed document.
+
+Chat retains explicit document IDs and selected folder IDs separately. Retrieval applies `owner AND model AND threshold AND (selected file OR selected folder)` before ordering and the four-passage limit. Folder membership is resolved by the SQL query; it is not copied into a potentially stale list of file IDs. Sources in saved answers remain immutable snapshots. Empty scopes never fall back to the whole library. UI source selection uses separate folder and individual-file views, with folder filtering in the latter.
+
+The first folder implementation is deliberately flat and single-parent. Folder deletion, nested folders, multiple-folder tags, sharing and tenant-level folder permissions remain outside this change. As with the existing document library, lists are unpaginated; server-side pagination/search should precede large-library deployment.

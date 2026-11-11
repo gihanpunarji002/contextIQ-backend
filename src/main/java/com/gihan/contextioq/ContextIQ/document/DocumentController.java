@@ -17,7 +17,7 @@ public class DocumentController {
 
     @PostMapping(consumes = "multipart/form-data")
     @ResponseStatus(HttpStatus.CREATED)
-    public DocumentView upload(@RequestPart("file") MultipartFile file) { return service.upload(file); }
+    public DocumentView upload(@RequestPart("file") MultipartFile file, @RequestParam(required = false) UUID folderId) { return service.upload(file, folderId); }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)

@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class DocumentService {
+    private final FolderRepository folders;
     private final CurrentUser current;
     private final DocumentRepository documents;
     private final TextChunker chunker;
@@ -20,8 +21,9 @@ public class DocumentService {
     private final TransactionTemplate transactions;
 
     public DocumentService(CurrentUser current, DocumentRepository documents, TextChunker chunker,
-                           EmbeddingService embeddings, PlatformTransactionManager manager, DocumentTextExtractor extractor) {
+                           EmbeddingService embeddings, PlatformTransactionManager manager, DocumentTextExtractor extractor, FolderRepository folders) {
         this.current = current;
+        this.folders = folders;
         this.documents = documents;
         this.chunker = chunker;
         this.extractor = extractor;
@@ -31,8 +33,11 @@ public class DocumentService {
 
     public List<DocumentView> list() { return documents.list(current.get().getId()); }
 
-    public DocumentView upload(MultipartFile file) {
+    public DocumentView upload(MultipartFile file) { return upload(file, null); }
+
+    public DocumentView upload(MultipartFile file, UUID folderId) {
         UUID owner = current.get().getId();
+        requireFolder(folderId, owner);
         String name = Optional.ofNullable(file.getOriginalFilename()).orElse("")
                 .replace('\\', '/');
         name = name.substring(name.lastIndexOf('/') + 1);
@@ -43,7 +48,16 @@ public class DocumentService {
         // Embedding happens before opening a DB transaction. A failure leaves no partial document.
         var vectors = embeddings.documents(chunks);
         String filename = name;
-        return transactions.execute(status -> documents.insert(owner, filename, file.getSize(), embeddings.model(), chunks, vectors));
+        return transactions.execute(status -> {
+            requireFolder(folderId, owner);
+            var doc = documents.insert(owner, filename, file.getSize(), embeddings.model(), chunks, vectors);
+            if (folderId != null) folders.move(doc.id(), owner, folderId);
+            return new DocumentView(doc.id(), doc.filename(), doc.sizeBytes(), doc.chunkCount(), doc.embeddingModel(), doc.createdAt(), folderId);
+        });
+    }
+
+    private void requireFolder(UUID id, UUID owner) {
+        if (id != null && !folders.exists(id, owner)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Folder not found");
     }
 
     public void delete(UUID id) {

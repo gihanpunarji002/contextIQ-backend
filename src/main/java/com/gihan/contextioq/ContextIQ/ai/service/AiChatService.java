@@ -13,7 +13,10 @@ public interface AiChatService {
     Integer outputTokens
   ) {}
 
-  record Status(String mode, String model, boolean configured, boolean documentSearch, boolean documentSelection) {
+  record Status(String mode, String model, boolean configured, boolean documentSearch, boolean documentSelection, boolean folderSelection) {
+    public Status(String mode, String model, boolean configured, boolean documentSearch, boolean documentSelection) {
+      this(mode, model, configured, documentSearch, documentSelection, true);
+    }
     public Status(String mode, String model, boolean configured, boolean documentSearch) {
       this(mode, model, configured, documentSearch, true);
     }

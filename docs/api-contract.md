@@ -153,3 +153,52 @@ Chat POST also accepts optional `documentIds` with the same validation. Omitted/
 Retrieval is restricted to the selected, still-available document IDs **and** account ownership before ranking and limiting; it never falls back to the entire library. An empty/unavailable-only selection returns a no-evidence response without calling the embedding model or LLM; the UI requires at least one available selection before sending in document mode. Old conversations start with general chat and no selection. Switching to general chat retains the selected IDs for later reuse. Concurrent selection changes while generating an answer cause **409**, preventing a stale reply from overwriting the newer selection.
 
 Existing message `sources` are immutable evidence snapshots. Expand a source beneath an answer to inspect its excerpt and retrieval score, including after deleting the original document. Deletion removes the indexed document and chunks, not historic evidence. `GET /api/v1/ai/status` includes `documentSelection:true`; the frontend blocks sending against an older backend to avoid silently ignoring the requested scope.
+
+
+## Document folders (V7)
+
+Folders are private to the signed-in account. Folder writes and document moves require the existing session and CSRF header. The structure is flat: a document has one `folderId`, or `null` for Unfiled. Moving changes metadata only, preserving document/chunk IDs and embeddings.
+
+- `GET /api/v1/folders` → **200** array ordered by name; each entry contains `id`, `name`, `icon`, `color`, `documentCount`, `createdAt`.
+- `POST /api/v1/folders` → **201** creates a folder.
+- `POST /api/v1/folders/{id}` → **200** edits the owned folder's name, icon and color.
+
+Create/update body (all fields required):
+
+```json
+{"name":"Agreements","icon":"AGREEMENT","color":"VIOLET"}
+```
+
+Names are trimmed, 1–80 characters, without control characters; exact names must be unique within an account. A duplicate name returns **409**. Supported icons: `FOLDER`, `WORK`, `ACCOUNTS`, `AUDITS`, `AGREEMENT`, `PROJECT`, `PEOPLE`, `ARCHIVE`. Colors: `BLUE`, `VIOLET`, `GREEN`, `AMBER`, `ROSE`, `SLATE`. Invalid values return **400**. Unknown/foreign folders return **404**. No arbitrary SVG or HTML is accepted.
+
+Example list response:
+
+```json
+[{"id":"<folder-uuid>","name":"Agreements","icon":"AGREEMENT","color":"VIOLET","documentCount":2,"createdAt":"2026-11-11T12:00:00Z"}]
+```
+
+`POST /api/v1/folders/move` → **204** after moving all requested documents. The operation is atomic; an unknown/foreign document or destination returns **404** and moves none. The list must contain 1–100 non-null document UUIDs (duplicates collapse); invalid lists return **400**. `folderId:null` or omitted moves files to Unfiled.
+
+```json
+{"documentIds":["<document-uuid>","<another-document-uuid>"],"folderId":"<folder-uuid>"}
+```
+
+`GET /api/v1/documents` now includes nullable `folderId`. The library applies filename, folder and type filters client-side to the owned library. `POST /api/v1/documents` optionally accepts multipart field `folderId`; ownership is checked before embedding and again when saving. Upload and folder assignment commit together; failure leaves no partially indexed file. Existing clients may omit the field.
+
+### Folder scope in chat
+
+Both chat POST and conversation-selection POST accept optional `folderIds` (up to 50 non-null UUIDs). Omitted/null retains the saved folder selection; `[]` clears it. Existing `documentIds` behavior is unchanged. The context response now includes `folders`:
+
+```json
+{"useDocuments":true,"documents":[],"folders":[{"id":"<folder-uuid>","name":"Agreements","available":true,"documentCount":2}]}
+```
+
+Example mixed scope:
+
+```json
+{"message":"What are our payment terms?","useDocuments":true,"documentIds":["<specific-document-uuid>"],"folderIds":["<folder-uuid>"]}
+```
+
+Folders and individual files are a **union**, constrained by account ownership and embedding model before ranking/limiting. Each chunk is returned once even if its document is selected both ways. A folder searches current membership at query time: additions and moves affect future answers; previously saved source excerpts are unchanged. Explicit files remain selected even if moved. Empty folders do not broaden the search. Empty/unavailable-only scope returns no evidence; the UI disables sending until a non-empty source is selected. Folder selections persist with the conversation; names/counts refresh on read.
+
+`GET /api/v1/ai/status` includes `folderSelection:true`. The frontend offers folder selection only when advertised; individual-file selection remains usable with the previous document-selection backend. Folder deletion, nesting and multi-folder membership are not implemented in this version.
