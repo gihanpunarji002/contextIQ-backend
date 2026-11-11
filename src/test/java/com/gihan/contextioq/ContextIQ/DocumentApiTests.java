@@ -74,10 +74,12 @@ class DocumentApiTests {
         mvc.perform(get("/api/v1/documents")).andExpect(status().isUnauthorized());
         mvc.perform(multipart("/api/v1/documents").file(file("a.txt", new byte[]{65})).with(user(owner.toString())))
                 .andExpect(status().isForbidden());
-        for (byte[] bytes : List.of(new byte[0], new byte[]{(byte) 0xC3}, new byte[]{0}, new byte[65537])) {
+        for (byte[] bytes : List.of(new byte[0], new byte[]{(byte) 0xC3}, new byte[]{0})) {
             mvc.perform(multipart("/api/v1/documents").file(file("a.txt", bytes)).with(user(owner.toString())).with(csrf()))
                     .andExpect(status().isBadRequest());
         }
+        mvc.perform(multipart("/api/v1/documents").file(file("a.txt", new byte[65537])).with(user(owner.toString())).with(csrf()))
+                .andExpect(status().isPayloadTooLarge());
         mvc.perform(multipart("/api/v1/documents").file(file("a.pdf", new byte[]{65})).with(user(owner.toString())).with(csrf()))
                 .andExpect(status().isUnsupportedMediaType());
         verifyNoInteractions(embedding);
@@ -90,6 +92,27 @@ class DocumentApiTests {
         mvc.perform(options("/api/v1/documents/" + UUID.randomUUID())
                 .header("Origin", "https://untrusted.example").header("Access-Control-Request-Method", "DELETE"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test void richUploadsPersistExtractedTextForRetrieval() throws Exception {
+        for (var item : Map.of("launch.pdf", DocumentFixtures.pdf("Juniper launches May 14.", false),
+                "launch.docx", DocumentFixtures.docx("Juniper launches May 14."),
+                "legacy.doc", DocumentFixtures.legacyDoc()).entrySet()) {
+            mvc.perform(multipart("/api/v1/documents").file(file(item.getKey(), item.getValue()))
+                    .with(user(owner.toString())).with(csrf()))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.embeddingModel").value("nomic-embed-text:latest"));
+        }
+        assertEquals(3, documents.list(owner).size());
+        var text = jdbc.queryForList("SELECT c.content FROM document_chunks c JOIN documents d ON d.id = c.document_id WHERE d.owner_id = ?", String.class, owner);
+        assertTrue(text.stream().anyMatch(s -> s.contains("May 14")));
+        assertTrue(text.stream().anyMatch(s -> s.contains("Morgan")));
+    }
+
+    @Test void extractionFailureDoesNotCallEmbeddingOrPersist() throws Exception {
+        mvc.perform(multipart("/api/v1/documents").file(file("locked.pdf", DocumentFixtures.pdf("Secret", true)))
+                .with(user(owner.toString())).with(csrf())).andExpect(status().isUnprocessableEntity());
+        assertTrue(documents.list(owner).isEmpty());
+        verifyNoInteractions(embedding);
     }
 
     @Test void failedEmbeddingLeavesNoPartialDocument() throws Exception {

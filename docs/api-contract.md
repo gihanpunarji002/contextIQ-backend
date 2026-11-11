@@ -78,7 +78,7 @@ Workspace creation/membership, account linking and AI provider key management re
 
 `GET /api/v1/documents` returns the current account's indexed documents, newest first. Empty library: `[]`.
 
-`POST /api/v1/documents` accepts **multipart/form-data**, part `file`, containing a UTF-8 `.txt` or `.md` file, non-empty and at most 65,536 bytes. It indexes synchronously and returns **201** only after all embeddings and chunks are saved. Use the same session and CSRF header as chat. Let the browser set the multipart boundary; do not set a JSON content type.
+`POST /api/v1/documents` accepts **multipart/form-data**, part `file`, containing a non-empty PDF/DOC/DOCX file up to 10 MiB or UTF-8 `.txt`/`.md` file up to 65,536 bytes. File content must match its extension; client MIME headers are not trusted. All formats have a 100,000-character extracted-text cap; excess text is rejected, not truncated. It indexes synchronously and returns **201** only after all embeddings and chunks are saved. Use the same session and CSRF header as chat. Let the browser set the multipart boundary; do not set a JSON content type.
 
 Example document/list item:
 
@@ -93,7 +93,7 @@ Example document/list item:
 }
 ```
 
-`DELETE /api/v1/documents/{id}` requires ownership and CSRF, returns **204**, and cascades to the document's chunks. Unknown or foreign IDs return **404**. Existing chat source snapshots are retained. Upload validation errors return **400**, unsupported extension **415**, multipart size limits **413**, failed embedding **502**. Nothing is indexed on embedding failure. Upload retries are not idempotent; check the list after an ambiguous timeout.
+`DELETE /api/v1/documents/{id}` requires ownership and CSRF, returns **204**, and cascades to the document's chunks. Unknown or foreign IDs return **404**. Existing chat source snapshots are retained. Upload validation errors return **400**; unsupported extensions or mismatched file contents **415**; upload, expanded ZIP or extracted-text limits **413**; encrypted, corrupt or textless documents **422**; failed embedding **502**. OCR is disabled; scanned documents without text return an actionable error. Nothing is indexed on embedding failure. Upload retries are not idempotent; check the list after an ambiguous timeout.
 
 ## Phase 3 grounded chat
 

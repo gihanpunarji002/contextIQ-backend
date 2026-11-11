@@ -105,7 +105,7 @@ Backend tests cover context startup, health, mock dashboard, blank/missing input
 - `GET /api/v1/chat/conversations/{id}/messages`
 - `GET /api/v1/ai/status`
 - `GET /api/v1/documents`
-- `POST /api/v1/documents` — multipart TXT/Markdown upload and indexing
+- `POST /api/v1/documents` — multipart PDF/Word/TXT/Markdown upload and indexing
 - `DELETE /api/v1/documents/{id}` — remove owned document and chunks
 - `GET /actuator/health` and `/actuator/info`
 
@@ -113,10 +113,12 @@ See [authentication setup and auth API](docs/authentication.md), [API contract](
 
 ## Limitations and next steps
 
-OLLAMA mode calls your local model through Spring AI; MOCK mode remains deterministic and never calls a provider. Documents are real, private TXT/Markdown uploads with local Nomic embeddings, pgvector retrieval and saved source excerpts. Dashboard metrics and recent activity remain synthetic. PDF/DOCX/OCR, background ingestion, hybrid ranking, workspace membership, account linking, and agents remain deferred. Conversations are private to their owning account. History is unpaginated for Phase 0; add bounded pagination before larger datasets. Sending is transactional, but retries are not idempotent: after an ambiguous timeout, inspect history before retrying. Token usage is recorded on generated assistant messages; streaming is deferred.
+OLLAMA mode calls your local model through Spring AI; MOCK mode remains deterministic and never calls a provider. Documents are real, private PDF/DOC/DOCX/TXT/Markdown uploads with local Nomic embeddings, pgvector retrieval and saved source excerpts. Dashboard metrics and recent activity remain synthetic. OCR, background ingestion, hybrid ranking, workspace membership, account linking, and agents remain deferred. Conversations are private to their owning account. History is unpaginated for Phase 0; add bounded pagination before larger datasets. Sending is transactional, but retries are not idempotent: after an ambiguous timeout, inspect history before retrying. Token usage is recorded on generated assistant messages; streaming is deferred.
 
 Phase 3 adds opt-in grounded chat using documents owned by the signed-in account. See [Phase 3 setup, evaluation and limitations](docs/phase-3-rag.md). Streaming and agents remain deferred. Spring AI 2.0.2 provides the native Ollama integration. See [Phase 2 setup and limitations](docs/phase-2-ollama.md).
 
 ## Ollama environment
 
 `AI_MODE` defaults to `OLLAMA` (`MOCK` for offline demos). `OLLAMA_MODEL` defaults to `gemma4:e2b`. Java on the Mac uses `OLLAMA_BASE_URL=http://localhost:11434`; Compose uses `OLLAMA_DOCKER_BASE_URL=http://host.docker.internal:11434`. Output/context defaults are 1200/16384 tokens. No API key is required. See [setup instructions](docs/phase-2-ollama.md).
+
+PDF and Word extraction uses Spring AI `TikaDocumentReader` with Apache Tika. See [file support, limits and rollout](docs/tika-ingestion.md). No database migration is needed for this reader extension.

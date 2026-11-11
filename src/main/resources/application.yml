@@ -1,8 +1,8 @@
 spring:
   servlet:
     multipart:
-      max-file-size: 64KB
-      max-request-size: 80KB
+      max-file-size: 10MB
+      max-request-size: 11MB
   config:
     import: optional:file:./.env[.properties]
   datasource:

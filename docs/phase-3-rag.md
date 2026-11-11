@@ -1,6 +1,6 @@
 # Phase 3 — private document RAG
 
-ContextIQ now supports authenticated TXT/Markdown upload, local Nomic embeddings through Spring AI, exact cosine retrieval in PostgreSQL/pgvector, and Gemma answers grounded in retrieved passages. No external AI account or API key is required. General chat remains available independently.
+ContextIQ now supports authenticated PDF/DOC/DOCX/TXT/Markdown upload, local Nomic embeddings through Spring AI, exact cosine retrieval in PostgreSQL/pgvector, and Gemma answers grounded in retrieved passages. No external AI account or API key is required. General chat remains available independently.
 
 ## Apply to the existing Docker setup
 
@@ -38,7 +38,7 @@ The already-running host Ollama must have both models. Neither Spring AI nor the
 ## Use it
 
 1. Open http://localhost:5173 and sign in again after the backend restart.
-2. In **Documents**, select a UTF-8 `.txt` or `.md` file (maximum 64 KiB) and choose **Upload and index**. Wait for success. Only then does the document appear in the indexed list.
+2. In **Documents**, select a PDF/DOC/DOCX file (maximum 10 MiB) or UTF-8 `.txt`/`.md` file (maximum 64 KiB) and choose **Upload and index**. Wait for success. Only then does the document appear in the indexed list.
 3. In **Chat**, enable **Search my documents**, then ask a self-contained question about the file.
 4. Expand the numbered source excerpts beneath the answer. These are retrieved evidence, not an assertion that every generated statement is correct.
 5. Reload the conversation: its answer and source snapshots remain available.
@@ -46,7 +46,7 @@ The already-running host Ollama must have both models. Neither Spring AI nor the
 
 ## Data flow and boundaries
 
-Upload → validate extension, size, strict UTF-8 and control characters → chunks of at most 1200 Unicode code points, with 200-code-point overlap → `search_document:` task prefix → Spring AI `OllamaEmbeddingModel` → validate 768 finite, nonzero vector dimensions → one transaction saves document/chunks/vectors. The original file is not stored separately; normalized chunk text is the persisted content. Indexing is synchronous. A failed embedding or insert leaves no partially indexed document. Uploading the same file again creates another document; after an ambiguous timeout, inspect the list before retrying.
+Upload → validate extension, size and actual content type → extract PDF/Word text with Tika or decode strict UTF-8 text → chunks of at most 1200 Unicode code points, with 200-code-point overlap → `search_document:` task prefix → Spring AI `OllamaEmbeddingModel` → validate 768 finite, nonzero vector dimensions → one transaction saves document/chunks/vectors. The original file is not stored separately; normalized chunk text is the persisted content. Indexing is synchronous. A failed embedding or insert leaves no partially indexed document. Uploading the same file again creates another document; after an ambiguous timeout, inspect the list before retrying.
 
 Document chat → verify conversation ownership → `search_query:` query embedding → SQL filters on owner and embedding model → exact cosine scoring → up to 4 passages scoring at least `RAG_MIN_SCORE` → current question and source text passed to Gemma → answer and source snapshots committed atomically with the conversation update. No matches produces a deterministic no-evidence response (zero token counts, `model=null`) without calling Gemma. MOCK mode rejects document-chat requests with 503 rather than pretending to use RAG.
 
@@ -94,6 +94,8 @@ The support escalation mailbox is juniper-support@example.test.
 | Delete the fixture, then ask again in document mode | No matches; previous conversation snapshots remain visible |
 | Disable document search | Normal Ollama general chat |
 
-A similarity threshold is a heuristic, not an answer-confidence score. Tune it with representative documents and questions; low thresholds may retrieve irrelevant passages, high thresholds may miss useful ones. Hybrid search, reranking, PDF/DOCX/OCR, streaming, formal evaluation runs and document versioning remain future work.
+A similarity threshold is a heuristic, not an answer-confidence score. Tune it with representative documents and questions; low thresholds may retrieve irrelevant passages, high thresholds may miss useful ones. Hybrid search, reranking, OCR, streaming, formal evaluation runs and document versioning remain future work.
 
 References: [Spring AI Ollama embeddings](https://docs.spring.io/spring-ai/reference/api/embeddings/ollama-embeddings.html), [Nomic task prefixes and dimensions](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5), [pgvector](https://github.com/pgvector/pgvector).
+
+PDF/Word support is implemented via Tika. See [Tika ingestion details](tika-ingestion.md) for extraction limits, errors and backend-only rollout when Phase 3 is already installed.
