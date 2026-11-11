@@ -9,6 +9,13 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       SERVER_ADDRESS: 0.0.0.0
       PORT: 8080
+      AI_MODE: ${AI_MODE:-OLLAMA}
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text:latest}
+      RAG_MIN_SCORE: ${RAG_MIN_SCORE:-0.45}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma4:e2b}
+      OLLAMA_MAX_OUTPUT_TOKENS: ${OLLAMA_MAX_OUTPUT_TOKENS:-1200}
+      OLLAMA_CONTEXT_SIZE: ${OLLAMA_CONTEXT_SIZE:-16384}
       GOOGLE_LOGIN_ENABLED: ${GOOGLE_LOGIN_ENABLED:-false}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -19,7 +26,10 @@ services:
       postgres:
         condition: service_healthy
   postgres:
-    image: postgres:17-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    image: contextiq-postgres-vector:17
     environment:
       POSTGRES_DB: ${DB_NAME:-contextiq}
       POSTGRES_USER: ${DB_USERNAME:?Set DB_USERNAME}

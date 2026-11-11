@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: 64KB
+      max-request-size: 80KB
   config:
     import: optional:file:./.env[.properties]
   datasource:
@@ -13,6 +17,7 @@ spring:
       hibernate.jdbc.time_zone: UTC
   flyway:
     enabled: true
+    locations: classpath:db/migration,classpath:db/postgresql
 management:
   endpoints.web.exposure.include: health,info
   endpoint.health.show-details: never
@@ -27,6 +32,15 @@ server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   port: ${PORT:8080}
 contextiq:
+  rag:
+    embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text:latest}
+    min-score: ${RAG_MIN_SCORE:0.45}
+  ai:
+    mode: ${AI_MODE:OLLAMA}
+    base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    model: ${OLLAMA_MODEL:gemma4:e2b}
+    max-output-tokens: ${OLLAMA_MAX_OUTPUT_TOKENS:1200}
+    context-size: ${OLLAMA_CONTEXT_SIZE:16384}
   auth:
     google-enabled: ${GOOGLE_LOGIN_ENABLED:false}
   frontend-url: ${FRONTEND_URL:http://localhost:5173}

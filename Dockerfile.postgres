@@ -1,0 +1,10 @@
+# Keep the existing PostgreSQL major version and Alpine base for the existing volume.
+FROM postgres:17-alpine AS build
+ARG PGVECTOR_VERSION=v0.8.7
+RUN apk add --no-cache build-base git linux-headers
+RUN git clone --branch "$PGVECTOR_VERSION" --depth 1 https://github.com/pgvector/pgvector.git /tmp/pgvector \
+    && cd /tmp/pgvector && make OPTFLAGS="" with_llvm=no && make install with_llvm=no
+
+FROM postgres:17-alpine
+COPY --from=build /usr/local/lib/postgresql/vector.so /usr/local/lib/postgresql/vector.so
+COPY --from=build /usr/local/share/postgresql/extension/vector* /usr/local/share/postgresql/extension/

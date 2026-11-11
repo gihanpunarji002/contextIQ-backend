@@ -1,38 +1,37 @@
 # Architecture
 
-## Current foundation
+## Current application
 
-The sibling frontend communicates over JSON/HTTP with the retained Spring Boot backend. React Router owns navigation; TanStack Query owns server state; Axios and feature API modules isolate HTTP. Only the theme is stored in browser localStorage. The active conversation ID is in the URL so reloads restore API history. New conversation is a draft until the first successful send. AuthProvider resolves the real session via `/auth/me`; protected routes wait for authentication.
+The sibling React/TypeScript frontend uses React Router, TanStack Query and Axios. Spring Boot 4.1.2, Java 21, Maven/WAR packaging, the original package and application class remain intact. Session-based email/password and optional Google OIDC authentication protect all knowledge and chat routes. Credentialed exact-origin CORS and CSRF headers cover uploads, chat mutations and deletion. Only theme preferences are stored in localStorage; the active conversation ID is in the URL.
 
-Backend flow: controller validates DTO → transactional ChatService → JPA repositories → PostgreSQL. ChatService calls AiChatService; MockAiChatService currently produces an explicitly labeled deterministic response. Chat entities never cross the HTTP boundary. A transaction commits both messages and the conversation update together, or rolls all of them back. Existing conversation rows are locked to serialize concurrent turns. Message timestamps have microsecond spacing and history is ordered by time and ID. IDs are UUIDs; timestamps are UTC Instants. Logs record IDs and mode, not message content.
+`config` owns provider, web and security configuration. `common.exception` provides safe ProblemDetail responses. `chat` owns conversation/message DTOs, JPA persistence and transactional orchestration. `ai.service` supplies general and grounded text generation through Spring AI's native Ollama adapter, with explicit MOCK mode for general-chat demos. `document` owns validation, chunking, upload/list/delete and SQL storage. `rag` owns embedding validation, retrieval and source DTOs. `dashboard` remains explicitly synthetic; workspace membership remains deferred.
 
-Modules: `config` configures exact-origin CORS; `common.exception` maps errors to ProblemDetail; `health` exposes application identity; `dashboard` serves mock DTOs; `chat` contains controller/service/DTO/entity/repository layers; `ai.service` provides the replaceable provider boundary. There are no empty document or workspace backend modules. Flyway alone changes schema. Actuator health checks database connectivity separately from application liveness.
+## Ingestion
 
-Accounts, conversations and messages are persisted. V2 adds app_users and conversation owner_id; legacy anonymous records remain unowned and hidden. The foreign key and indexes support ordered history. No speculative tenant or vector schema is present. The development database is bound to loopback and uses a named Docker volume. PostgreSQL credentials are supplied from the environment. No credentials are committed.
+Authenticated multipart upload → validate TXT/Markdown, 64 KiB maximum, strict UTF-8 → normalize line endings → 1200-code-point chunks with 200-code-point overlap → Nomic `search_document:` embeddings through Spring AI → validate 768 dimensions and finite/nonzero values → one transaction inserts metadata/chunks/vectors. There are no external calls inside the write transaction. Failure does not leave partial documents. Original binary files are not retained separately from chunk text. Filename metadata is never used as a filesystem path.
 
-## Future ingestion pipeline (Phase 2)
+PostgreSQL uses pgvector installed in a custom PostgreSQL 17 Alpine image, preserving the original volume/base family. Flyway V4 adds relational storage and source snapshots; PostgreSQL-specific V5 installs the vector extension and column. H2 tests use a separate V5 with TEXT storage and do not claim vector-search parity. JPA continues to validate its schema; JDBC handles vector SQL and document/source tables. No application schema auto-creation is used.
 
-Authorized upload → validate size/type → durable object storage → queued parsing → normalized text → chunking → embedding provider → PostgreSQL pgvector index. Track document versions, ingestion status, errors, retries, and source metadata. Do not treat untrusted document text as instructions. Apply document access filtering before retrieval and generation.
+## Query and generation
 
-## Future query pipeline
+General chat loads up to 20 recent messages within a character budget. Document mode instead retrieves using the current self-contained question; prior generated answers are not source evidence. The repository applies account ownership and embedding-model filters in SQL before sorting exact cosine scores and limiting to four passages. Similarity below the configured threshold is excluded. No matching evidence returns an explicit no-match answer without generation.
 
-Authenticated tenant/workspace scope → query normalization → lexical and vector retrieval → permission filtering → ranking → context assembly → Gemini generation → streamed answer with citations → usage and evaluation events. A real provider implementation will replace the mock; conversation orchestration will need explicit streaming/failure semantics rather than holding database transactions across remote calls.
+For matching evidence, Ollama receives the question and bounded passages, with instructions to treat passages as untrusted data, cite numbered sources, and acknowledge missing information. No tools or browsing are available. Retrieved excerpts are shown separately from generated prose; they do not constitute an automated guarantee of factuality. Follow-up query rewriting, hybrid search, reranking and prompt-injection evaluation remain future work.
 
-## Proposed tables, deliberately deferred
+ChatService uses short transactions around network calls: read owned conversation state, retrieve/generate outside a transaction, then lock/revalidate the conversation and atomically persist the user message, assistant answer, provenance, source snapshots and updated timestamp. A concurrent update returns 409 rather than appending an answer based on stale history. There are no automatic send retries or idempotency keys; inspect history after ambiguous network failures.
 
-- `organizations`, `workspaces`: membership and tenant scope; account identity now lives in `app_users`.
-- `documents`, `document_chunks`: versions, ownership, access rules, parsing/chunk metadata and source offsets.
-- Embeddings/vector data: model/version/dimension metadata and pgvector values, linked to chunks.
-- `citations`: links from generated answers to verified source chunks.
-- `tool_execution_logs`: agent invocation audit, results and approval state.
-- `evaluation_runs`: retrieval and answer-quality datasets, measurements and model versions.
+## Data and access
 
-Account authentication and conversation ownership are implemented; tenant isolation still must land before a shared enterprise deployment. CORS is not authorization. Plan pagination, request limits, retention/deletion, idempotency, telemetry, backups, TLS and secret management before production.
+- `app_users`: account identity and password/Google identity.
+- `conversations`, `messages`: account-owned chat, UTC timestamps, provider/token metadata and retrieval flag.
+- `documents`: owner, filename, size, chunk count and embedding model.
+- `document_chunks`: ordered normalized text, FK cascade deletion and `vector(768)` data.
+- `message_sources`: ordered passage snapshots persisted with an assistant message. Source snapshots deliberately survive deletion of the original document; conversation authorization protects them.
 
-## Integration references
+All document list/delete/retrieval operations use the current account. Unknown or foreign document/conversation IDs return 404. The database has a named persistent volume; credentials stay in the environment. Source and prompt text should not be logged. No shared workspace or tenant permissions are implied by per-account isolation.
 
-The dependency setup follows [Spring Boot Flyway guidance](https://docs.spring.io/spring-boot/how-to/data-initialization.html) and [Tailwind's Vite plugin integration](https://tailwindcss.com/docs/installation/using-vite). Java 21, WAR packaging and the existing Boot version are preserved.
+## Next extensions
 
-## Authentication extension
+Queued ingestion with status/retry/idempotency, PDF/DOCX parsing and OCR; content hashes and document versions; embedding-model digests and reindexing; lexical/vector hybrid retrieval and reranking; `evaluation_runs` for repeatable recall, groundedness and abstention measurements; organizations/workspaces and document permission grants; `tool_execution_logs` for future agents. Paginate document/chat history and add quotas, rate limits, retention, backup/restore validation and observability before production.
 
-Spring Security protects APIs using server sessions, credentialed exact-origin CORS and CSRF tokens. Auth controllers use DTOs and explicit security-context persistence; AccountService owns hashing, registration and Google account provisioning. Google OIDC delegates token/state/nonce validation to Spring Security. The provider remains optional and secrets never enter the browser. See [authentication design and setup](authentication.md) for session lifecycle, ownership and limitations.
+Read [Phase 3 setup and limitations](phase-3-rag.md), [authentication setup](authentication.md) and [API contract](api-contract.md). References: [Spring AI Ollama embeddings](https://docs.spring.io/spring-ai/reference/api/embeddings/ollama-embeddings.html), [pgvector](https://github.com/pgvector/pgvector).

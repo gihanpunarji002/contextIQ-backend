@@ -20,63 +20,158 @@ public class ChatService {
   private final ConversationRepository conversations;
   private final MessageRepository messages;
   private final AiChatService ai;
+  private final com.gihan.contextioq.ContextIQ.rag.RetrievalService retrieval;
+  private final com.gihan.contextioq.ContextIQ.document.DocumentRepository documents;
+  private final org.springframework.transaction.support.TransactionTemplate transactions;
   private final com.gihan.contextioq.ContextIQ.auth.service.CurrentUser current;
 
   public ChatService(
     ConversationRepository c,
     MessageRepository m,
     AiChatService ai,
-    com.gihan.contextioq.ContextIQ.auth.service.CurrentUser current
+    com.gihan.contextioq.ContextIQ.auth.service.CurrentUser current,
+    org.springframework.transaction.PlatformTransactionManager manager,
+    com.gihan.contextioq.ContextIQ.rag.RetrievalService retrieval,
+    com.gihan.contextioq.ContextIQ.document.DocumentRepository documents
   ) {
     conversations = c;
     messages = m;
     this.ai = ai;
+    this.retrieval = retrieval;
+    this.documents = documents;
     this.current = current;
+    transactions =
+      new org.springframework.transaction.support.TransactionTemplate(manager);
   }
 
-  @Transactional
+  private record Snapshot(
+    UUID id,
+    Instant updatedAt,
+    List<AiChatService.Turn> history
+  ) {}
+
   public SendResponse send(SendRequest request) {
+    UUID owner = current.get().getId();
     String text = request.message().strip();
-    Conversation c =
-      request.conversationId() == null
-        ? conversations.save(
-            new Conversation(
-              text.substring(0, Math.min(120, text.length())),
-              current.get().getId()
-            )
-          )
-        : conversations
-            .findForUpdateById(request.conversationId(), current.get().getId())
-            .orElseThrow(() ->
-              new ResponseStatusException(
-                HttpStatus.NOT_FOUND,
-                "Conversation not found"
-              )
-            );
-    // Serialize turns per conversation; microsecond spacing gives stable PostgreSQL ordering.
-    Instant time = Instant.now().truncatedTo(
-      java.time.temporal.ChronoUnit.MICROS
-    );
-    if (!time.isAfter(c.getUpdatedAt())) time = c
-      .getUpdatedAt()
-      .plusNanos(1000);
-    Message user = messages.save(new Message(c, MessageRole.USER, text, time));
-    Message assistant = messages.save(
-      new Message(
+    Snapshot snapshot = transactions.execute(status -> {
+      if (request.conversationId() == null) return new Snapshot(
+        null,
+        null,
+        List.of()
+      );
+      var conversation = conversations
+        .findById(request.conversationId())
+        .filter(c -> owner.equals(c.getOwnerId()))
+        .orElseThrow(this::notFound);
+      var recent = new ArrayList<>(
+        messages.findTop20ByConversationIdOrderByCreatedAtDescIdDesc(
+          conversation.getId()
+        )
+      );
+      Collections.reverse(recent);
+      // Exclude old mock turns from real model context. Keep complete recent turns within a character budget.
+      var context = new ArrayList<AiChatService.Turn>();
+      int chars = text.length();
+      for (int i = recent.size() - 2; i >= 0; i -= 2) {
+        Message user = recent.get(i),
+          assistant = recent.get(i + 1);
+        if (
+          user.getRole() != MessageRole.USER ||
+          assistant.getRole() != MessageRole.ASSISTANT
+        ) continue;
+        if (
+          !"MOCK".equals(ai.status().mode()) &&
+          "MOCK".equals(assistant.getMode())
+        ) continue;
+        int length =
+          user.getContent().length() + assistant.getContent().length();
+        if (chars + length > 32000) break;
+        chars += length;
+        context.addFirst(
+          new AiChatService.Turn("assistant", assistant.getContent())
+        );
+        context.addFirst(new AiChatService.Turn("user", user.getContent()));
+      }
+      return new Snapshot(
+        conversation.getId(),
+        conversation.getUpdatedAt(),
+        List.copyOf(context)
+      );
+    });
+    var input = new ArrayList<>(snapshot.history());
+    input.add(new AiChatService.Turn("user", text));
+    // Never hold a database connection or row lock across the external API call.
+    if (request.useDocuments() && !"OLLAMA".equals(ai.status().mode())) {
+      throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Document chat requires Ollama. Switch the backend to OLLAMA.");
+    }
+    var sources = request.useDocuments() ? retrieval.retrieve(owner, text)
+      : java.util.List.<com.gihan.contextioq.ContextIQ.rag.Source>of();
+    AiChatService.Reply reply;
+    if (!request.useDocuments()) reply = ai.reply(List.copyOf(input));
+    else if (sources.isEmpty()) reply = new AiChatService.Reply(
+      "I couldn't find relevant passages in your documents. Upload a text document or ask a more specific question.",
+      "OLLAMA", null, 0, 0);
+    else reply = ai.groundedReply(text, sources);
+    return transactions.execute(status -> {
+      Conversation c;
+      if (snapshot.id() == null) c = conversations.save(
+        new Conversation(text.substring(0, Math.min(120, text.length())), owner)
+      );
+      else {
+        c = conversations
+          .findForUpdateById(snapshot.id(), owner)
+          .orElseThrow(this::notFound);
+        if (
+          !c.getUpdatedAt().equals(snapshot.updatedAt())
+        ) throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "This conversation changed while generating a reply. Reload history before retrying."
+        );
+      }
+      Instant time = Instant.now().truncatedTo(
+        java.time.temporal.ChronoUnit.MICROS
+      );
+      if (!time.isAfter(c.getUpdatedAt())) time = c
+        .getUpdatedAt()
+        .plusNanos(1000);
+      Message user = messages.save(
+        new Message(c, MessageRole.USER, text, time)
+      );
+      Message assistant = new Message(
         c,
         MessageRole.ASSISTANT,
-        ai.reply(text),
+        reply.content(),
         time.plusNanos(1000)
-      )
-    );
-    c.touch(assistant.getCreatedAt());
-    log.info("Saved {} chat turn in conversation {}", ai.mode(), c.getId());
-    return new SendResponse(
-      c.getId(),
-      user.getId(),
-      assistant.getId(),
-      assistant.getContent(),
-      ai.mode()
+      );
+      assistant.setProvider(reply);
+      assistant.setRetrievalUsed(request.useDocuments());
+      messages.saveAndFlush(assistant);
+      documents.saveSources(assistant.getId(), sources);
+      c.touch(assistant.getCreatedAt());
+      log.info(
+        "Saved {} chat turn in conversation {}",
+        reply.mode(),
+        c.getId()
+      );
+      return new SendResponse(
+        c.getId(),
+        user.getId(),
+        assistant.getId(),
+        reply.content(),
+        reply.mode(),
+        reply.model(),
+        reply.inputTokens(),
+        reply.outputTokens(),
+        request.useDocuments(),
+        sources
+      );
+    });
+  }
+
+  private ResponseStatusException notFound() {
+    return new ResponseStatusException(
+      HttpStatus.NOT_FOUND,
+      "Conversation not found"
     );
   }
 
@@ -103,7 +198,7 @@ public class ChatService {
     return messages
       .findByConversationIdOrderByCreatedAtAscIdAsc(id)
       .stream()
-      .map(MessageView::from)
+      .map(message -> MessageView.from(message, documents.sources(message.getId())))
       .toList();
   }
 }

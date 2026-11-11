@@ -40,6 +40,10 @@ public class Conversation {
     return id;
   }
 
+  public UUID getOwnerId() {
+    return ownerId;
+  }
+
   public String getTitle() {
     return title;
   }

@@ -1,6 +1,6 @@
-# ContextIQ — Phase 0
+# ContextIQ — Phase 3: Private document RAG
 
-An enterprise knowledge platform foundation with a persistent mock assistant. No LLM API key is needed. Account authentication is implemented with email/password and optional Google login. See [authentication setup](docs/authentication.md) for configuration and manual Docker rebuild steps.
+An enterprise knowledge platform with authenticated local Ollama chat and private document retrieval. **Existing installations: follow [Phase 3 rollout](docs/phase-3-rag.md) to add pgvector before restarting the updated backend.** See [Phase 2 setup](docs/phase-2-ollama.md) for Spring AI and gemma4:e2b; MOCK mode remains available for offline demos. Account authentication is implemented with email/password and optional Google login. See [authentication setup](docs/authentication.md) for configuration and manual Docker rebuild steps.
 
 ## Layout and prerequisites
 
@@ -15,13 +15,13 @@ From this backend folder:
 ```sh
 cp .env.example .env # only if .env does not already exist
 # Edit .env: set DB_USERNAME and a strong DB_PASSWORD. Never commit .env.
-docker compose up -d --wait postgres
+docker compose up -d --build --wait postgres
 ./mvnw spring-boot:run
 ```
 
 The verified local `.env` uses PostgreSQL host port **5433** because 5432 was already occupied (the example defaults remain 5432). A generated local `.env` may already exist from verification; keep it private. Spring imports the optional `.env` in the working directory as a Java properties file. For IntelliJ launches, set the working directory to this backend folder. Use plain `KEY=value` entries without surrounding quotes or `export`; quotes become part of the value in Java properties. Environment variables override values from the file, and deployments can omit it entirely. `DB_URL` must start with `jdbc:postgresql://` (for example, `jdbc:postgresql://localhost:5433/contextiq`). Backend: http://localhost:8080. It binds to loopback by default. Compose stores data in the named `contextiq-data` volume. `docker compose down` preserves data; `down -v` destroys it and should only be used deliberately.
 
-Flyway runs the versioned migrations in `src/main/resources/db/migration/` before JPA initialization. Hibernate uses `ddl-auto=validate`, including in tests. Add new versioned migrations for schema changes; never edit migrations already applied to a database. UTC `Instant` timestamps use PostgreSQL `TIMESTAMP WITH TIME ZONE` (equivalent to TIMESTAMPTZ).
+Flyway runs the versioned migrations in `src/main/resources/db/migration/` and `src/main/resources/db/postgresql/` before JPA initialization. Hibernate uses `ddl-auto=validate`, including in tests. Add new versioned migrations for schema changes; never edit migrations already applied to a database. UTC `Instant` timestamps use PostgreSQL `TIMESTAMP WITH TIME ZONE` (equivalent to TIMESTAMPTZ).
 
 ## Run backend and PostgreSQL together in Docker
 
@@ -76,6 +76,8 @@ Open http://localhost:5173. Vite uses strict port 5173, matching the default all
 | `GOOGLE_LOGIN_ENABLED` | Defaults to false; enable after configuring credentials |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Server-only Google OAuth web client credentials |
 | `SESSION_COOKIE_SECURE` | false for localhost HTTP; set true on HTTPS deployments |
+| `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text:latest`; 768-dimensional Nomic embeddings |
+| `RAG_MIN_SCORE` | Minimum cosine similarity for retrieval, default `0.45` |
 | `VITE_API_BASE_URL` | Frontend API root, default `http://localhost:8080/api/v1` |
 
 Never place provider API keys in Vite variables: those values are public browser code. A prod profile alone does not make this development foundation production-ready.
@@ -101,12 +103,20 @@ Backend tests cover context startup, health, mock dashboard, blank/missing input
 - `POST /api/v1/chat/messages` — persist a user/assistant turn, create conversation if ID omitted
 - `GET /api/v1/chat/conversations`
 - `GET /api/v1/chat/conversations/{id}/messages`
+- `GET /api/v1/ai/status`
+- `GET /api/v1/documents`
+- `POST /api/v1/documents` — multipart TXT/Markdown upload and indexing
+- `DELETE /api/v1/documents/{id}` — remove owned document and chunks
 - `GET /actuator/health` and `/actuator/info`
 
 See [authentication setup and auth API](docs/authentication.md), [API contract](docs/api-contract.md), [architecture](docs/architecture.md), and [roadmap](docs/roadmap.md).
 
 ## Limitations and next steps
 
-The mock reply is deterministic and never calls an AI provider. Documents and recent dashboard activity are labeled frontend samples. Dashboard metrics are synthetic, including conversation counts. Upload, retrieval, embeddings, workspace membership, account linking, and agents are deferred. Conversations are private to their owning account. History is unpaginated for Phase 0; add bounded pagination before larger datasets. Sending is transactional, but retries are not idempotent: after an ambiguous timeout, inspect history before retrying. No streaming or token usage yet.
+OLLAMA mode calls your local model through Spring AI; MOCK mode remains deterministic and never calls a provider. Documents are real, private TXT/Markdown uploads with local Nomic embeddings, pgvector retrieval and saved source excerpts. Dashboard metrics and recent activity remain synthetic. PDF/DOCX/OCR, background ingestion, hybrid ranking, workspace membership, account linking, and agents remain deferred. Conversations are private to their owning account. History is unpaginated for Phase 0; add bounded pagination before larger datasets. Sending is transactional, but retries are not idempotent: after an ambiguous timeout, inspect history before retrying. Token usage is recorded on generated assistant messages; streaming is deferred.
 
-Phase 1 will replace `MockAiChatService` with a server-side Gemini integration through the `AiChatService` boundary, adding streaming, timeouts, usage measurement and provider error handling. Document ingestion and indexing begin in Phase 2. No heavy AI dependency is installed now.
+Phase 3 adds opt-in grounded chat using documents owned by the signed-in account. See [Phase 3 setup, evaluation and limitations](docs/phase-3-rag.md). Streaming and agents remain deferred. Spring AI 2.0.2 provides the native Ollama integration. See [Phase 2 setup and limitations](docs/phase-2-ollama.md).
+
+## Ollama environment
+
+`AI_MODE` defaults to `OLLAMA` (`MOCK` for offline demos). `OLLAMA_MODEL` defaults to `gemma4:e2b`. Java on the Mac uses `OLLAMA_BASE_URL=http://localhost:11434`; Compose uses `OLLAMA_DOCKER_BASE_URL=http://host.docker.internal:11434`. Output/context defaults are 1200/16384 tokens. No API key is required. See [setup instructions](docs/phase-2-ollama.md).
