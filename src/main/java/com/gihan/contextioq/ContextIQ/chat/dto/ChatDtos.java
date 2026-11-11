@@ -12,11 +12,17 @@ public final class ChatDtos {
   public record SendRequest(
     @NotBlank @Size(max = 8000) String message,
     UUID conversationId,
-    Boolean useDocuments
+    Boolean useDocuments,
+    @Size(max = 50) java.util.List<@NotNull UUID> documentIds
   ) {
+    public SendRequest(String message, UUID conversationId, Boolean useDocuments) { this(message, conversationId, useDocuments, null); }
     public SendRequest { useDocuments = Boolean.TRUE.equals(useDocuments); }
-    public SendRequest(String message, UUID conversationId) { this(message, conversationId, false); }
+    public SendRequest(String message, UUID conversationId) { this(message, conversationId, false, null); }
   }
+
+  public record SelectedDocument(UUID id, String filename, boolean available) {}
+  public record DocumentContext(boolean useDocuments, java.util.List<SelectedDocument> documents) {}
+  public record DocumentSelection(boolean useDocuments, @NotNull @Size(max = 50) java.util.List<@NotNull UUID> documentIds) {}
 
   public record ConversationView(
     UUID id,

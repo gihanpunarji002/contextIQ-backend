@@ -35,6 +35,22 @@ class RagTests {
         verify(documents).search(owner, "nomic", vector, 0.45);
     }
 
+    @Test void selectedScopeNeverFallsBackToTheEntireLibrary() {
+        var documents = mock(DocumentRepository.class);
+        var embeddings = mock(EmbeddingService.class);
+        var retrieval = new RetrievalService(embeddings, documents, 0.45);
+        var owner = UUID.randomUUID();
+        assertTrue(retrieval.retrieve(owner, "question", List.of()).isEmpty());
+        verifyNoInteractions(embeddings, documents);
+        var ids = List.of(UUID.randomUUID(), UUID.randomUUID());
+        var vector = new float[]{1};
+        when(embeddings.model()).thenReturn("nomic");
+        when(embeddings.query("question")).thenReturn(vector);
+        retrieval.retrieve(owner, "question", ids);
+        verify(documents).search(owner, "nomic", vector, 0.45, ids);
+        verify(documents, never()).search(any(), any(), any(), anyDouble());
+    }
+
     @Test void queryPrefixAndInvalidDimensions() {
         var model = mock(EmbeddingModel.class);
         var service = new EmbeddingService(model, "nomic-embed-text:latest");

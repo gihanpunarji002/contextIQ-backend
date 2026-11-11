@@ -21,6 +21,14 @@ public class ChatController {
     return service.send(request);
   }
 
+  @GetMapping("/conversations/{id}/documents")
+  public DocumentContext documents(@PathVariable UUID id) { return service.documentContext(id); }
+
+  @PostMapping("/conversations/{id}/documents")
+  public DocumentContext selectDocuments(@PathVariable UUID id, @Valid @RequestBody DocumentSelection request) {
+    return service.selectDocuments(id, request);
+  }
+
   @GetMapping("/conversations")
   public List<ConversationView> conversations() {
     return service.conversations();

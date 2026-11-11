@@ -21,6 +21,11 @@ public class RetrievalService {
         this.threshold = threshold;
     }
 
+    public List<Source> retrieve(UUID owner, String question, List<UUID> selected) {
+        if (selected.isEmpty()) return List.of();
+        return documents.search(owner, embeddings.model(), embeddings.query(question), threshold, selected);
+    }
+
     public List<Source> retrieve(UUID owner, String question) {
         if (documents.list(owner).isEmpty()) return List.of();
         return documents.search(owner, embeddings.model(), embeddings.query(question), threshold);

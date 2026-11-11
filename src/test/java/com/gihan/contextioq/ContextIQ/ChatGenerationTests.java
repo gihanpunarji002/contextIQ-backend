@@ -34,6 +34,9 @@ class ChatGenerationTests {
   @Autowired
   MessageRepository messages;
 
+  @Autowired
+  com.gihan.contextioq.ContextIQ.document.DocumentRepository documents;
+
   @MockitoBean
   AiChatService ai;
 
@@ -96,20 +99,42 @@ class ChatGenerationTests {
 
   @Test
   void groundedAnswerPersistsSourceSnapshotsAndNoMatchSkipsGeneration() {
-    var source = new com.gihan.contextioq.ContextIQ.rag.Source(UUID.randomUUID(), UUID.randomUUID(),
+    var doc = documents.insert(current.get().getId(), "launch.md", 20, "nomic", List.of("May 14"), List.of(new float[]{1}));
+    var source = new com.gihan.contextioq.ContextIQ.rag.Source(doc.id(), UUID.randomUUID(),
       "launch.md", 0, "Juniper launches on May 14.", 0.8);
-    when(retrieval.retrieve(any(), eq("When?"))).thenReturn(List.of(source));
+    when(retrieval.retrieve(any(), eq("When?"), anyList())).thenReturn(List.of(source));
     when(ai.groundedReply(eq("When?"), anyList())).thenReturn(
       new AiChatService.Reply("May 14 [1]", "OLLAMA", "test", 20, 5));
-    var answer = chat.send(new SendRequest("When?", null, true));
+    var answer = chat.send(new SendRequest("When?", null, true, List.of(doc.id())));
     assertTrue(answer.retrievalUsed());
+    verify(retrieval).retrieve(current.get().getId(), "When?", List.of(doc.id()));
+    assertEquals(doc.id(), chat.documentContext(answer.conversationId()).documents().getFirst().id());
+    assertTrue(chat.documentContext(answer.conversationId()).useDocuments());
+    documents.delete(doc.id(), current.get().getId());
+    assertFalse(chat.documentContext(answer.conversationId()).documents().getFirst().available());
     assertEquals(List.of(source), chat.history(answer.conversationId()).get(1).sources());
-    when(retrieval.retrieve(any(), eq("Unknown?"))).thenReturn(List.of());
-    var empty = chat.send(new SendRequest("Unknown?", null, true));
+    when(retrieval.retrieve(any(), eq("Unknown?"), anyList())).thenReturn(List.of());
+    var empty = chat.send(new SendRequest("Unknown?", answer.conversationId(), true));
     assertTrue(empty.response().contains("couldn't find"));
+    verify(retrieval).retrieve(current.get().getId(), "Unknown?", List.of());
+    assertEquals("launch.md", chat.documentContext(answer.conversationId()).documents().getFirst().filename());
     assertEquals(0, empty.outputTokens());
     verify(ai, never()).groundedReply(eq("Unknown?"), anyList());
     verify(ai, never()).reply(anyList());
+  }
+
+  @Test
+  void changingSelectionDuringGenerationRejectsTheStaleReply() {
+    when(ai.reply(anyList())).thenReturn(new AiChatService.Reply("First", "OLLAMA", "test", 1, 1));
+    var first = chat.send(new SendRequest("Start", null));
+    when(ai.reply(anyList())).thenAnswer(invocation -> {
+      chat.selectDocuments(first.conversationId(), new com.gihan.contextioq.ContextIQ.chat.dto.ChatDtos.DocumentSelection(false, List.of()));
+      return new AiChatService.Reply("Stale", "OLLAMA", "test", 1, 1);
+    });
+    var failure = assertThrows(ResponseStatusException.class,
+      () -> chat.send(new SendRequest("Follow up", first.conversationId())));
+    assertEquals(HttpStatus.CONFLICT, failure.getStatusCode());
+    assertEquals(2, chat.history(first.conversationId()).size());
   }
 
   @Test

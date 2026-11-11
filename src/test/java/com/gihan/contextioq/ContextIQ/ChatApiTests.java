@@ -51,6 +51,57 @@ class ChatApiTests {
   ConversationRepository conversations;
 
   @Test
+  void selectionPersistsAndDeletedDocumentsRemainVisible() throws Exception {
+    var owner = java.util.UUID.fromString("10000000-0000-0000-0000-000000000001");
+    var conversation = conversations.saveAndFlush(new com.gihan.contextioq.ContextIQ.chat.entity.Conversation("Selection test", owner));
+    var first = java.util.UUID.randomUUID();
+    var second = java.util.UUID.randomUUID();
+    for (var doc : java.util.List.of(first, second)) jdbc.update(
+      "INSERT INTO documents VALUES (?, ?, ?, 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, owner, doc + ".txt");
+    String route = "/api/v1/chat/conversations/" + conversation.getId() + "/documents";
+    String body = "{\"useDocuments\":true,\"documentIds\":[\"" + first + "\",\"" + second + "\"]}";
+    mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+      .contentType(MediaType.APPLICATION_JSON).content(body))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.documents.length()").value(2));
+    mvc.perform(get(route)).andExpect(jsonPath("$.useDocuments").value(true))
+      .andExpect(jsonPath("$.documents[0].id").value(first.toString()))
+      .andExpect(jsonPath("$.documents[1].available").value(true));
+    jdbc.update("DELETE FROM documents WHERE id = ?", first);
+    mvc.perform(get(route)).andExpect(jsonPath("$.documents[0].available").value(false))
+      .andExpect(jsonPath("$.documents[0].filename").value(first + ".txt"));
+    // A retained tombstone is valid; it cannot be used to introduce an arbitrary unknown ID.
+    mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+      .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+    mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+      .contentType(MediaType.APPLICATION_JSON).content("{\"useDocuments\":false,\"documentIds\":[\"" + java.util.UUID.randomUUID() + "\"]}"))
+      .andExpect(status().isNotFound());
+    mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+      .contentType(MediaType.APPLICATION_JSON).content("{\"useDocuments\":false,\"documentIds\":[null]}"))
+      .andExpect(status().isBadRequest());
+    mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+      .contentType(MediaType.APPLICATION_JSON).content("{\"useDocuments\":false,\"documentIds\":[]}"))
+      .andExpect(status().isOk()).andExpect(jsonPath("$.documents.length()").value(0));
+    mvc.perform(get(route)).andExpect(jsonPath("$.documents.length()").value(0));
+  }
+
+  @Test
+  void otherAccountsCannotReadOrChangeSelectionsOrSelectForeignDocuments() throws Exception {
+    var other = java.util.UUID.randomUUID();
+    jdbc.update("INSERT INTO app_users(id,first_name,last_name,email,password_hash,created_at) VALUES (?, 'Other', 'User', ?, 'test', CURRENT_TIMESTAMP)", other, other + "@example.com");
+    var foreignConversation = conversations.saveAndFlush(new com.gihan.contextioq.ContextIQ.chat.entity.Conversation("Private", other));
+    String route = "/api/v1/chat/conversations/" + foreignConversation.getId() + "/documents";
+    mvc.perform(get(route)).andExpect(status().isNotFound());
+    mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+      .contentType(MediaType.APPLICATION_JSON).content("{\"useDocuments\":false,\"documentIds\":[]}"))
+      .andExpect(status().isNotFound());
+    var doc = java.util.UUID.randomUUID();
+    jdbc.update("INSERT INTO documents VALUES (?, ?, 'private.txt', 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, other);
+    mvc.perform(post("/api/v1/chat/messages").with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+      .contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"Hi\",\"documentIds\":[\"" + doc + "\"]}"))
+      .andExpect(status().isNotFound());
+  }
+
+  @Test
   void healthAndSummary() throws Exception {
     mvc
       .perform(get("/api/v1/health"))

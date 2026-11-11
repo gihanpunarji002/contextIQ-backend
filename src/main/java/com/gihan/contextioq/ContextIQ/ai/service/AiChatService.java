@@ -13,7 +13,10 @@ public interface AiChatService {
     Integer outputTokens
   ) {}
 
-  record Status(String mode, String model, boolean configured, boolean documentSearch) {
+  record Status(String mode, String model, boolean configured, boolean documentSearch, boolean documentSelection) {
+    public Status(String mode, String model, boolean configured, boolean documentSearch) {
+      this(mode, model, configured, documentSearch, true);
+    }
     public Status(String mode, String model, boolean configured) {
       this(mode, model, configured, "OLLAMA".equals(mode));
     }

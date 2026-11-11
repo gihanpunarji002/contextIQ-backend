@@ -37,3 +37,10 @@ Queued ingestion with status/retry/idempotency, OCR; content hashes and document
 Read [Phase 3 setup and limitations](phase-3-rag.md), [authentication setup](authentication.md) and [API contract](api-contract.md). References: [Spring AI Ollama embeddings](https://docs.spring.io/spring-ai/reference/api/embeddings/ollama-embeddings.html), [pgvector](https://github.com/pgvector/pgvector).
 
 The pinned Spring AI reader resolves Apache Tika 3.3.1. `contextiq-tika.xml` allows only PDF and Microsoft Word parsers and sets PDF OCR to `no_ocr`. The extractor sets Tika’s documented JVM configuration hook before creating readers because the reader does not expose parser/context injection. A per-request bounded SAX handler rejects excess output rather than indexing a truncated prefix. ZIP expansion is checked before container detection; content detection ignores client MIME headers. Parsing runs in-process; output/ZIP limits are not a hard CPU or memory sandbox.
+
+
+### Conversation document scope
+
+Flyway V6 adds `conversations.use_documents` and `conversation_documents` (conversation FK, document UUID, filename snapshot, selection order). The document UUID intentionally has no document FK: deletion preserves an unavailable selection rather than silently changing its meaning. Reads join the current account's documents to compute availability. Only owned documents or an existing conversation's tombstones may be saved. Conversation ownership is validated before accessing selections.
+
+Chat snapshots the selected scope before retrieval, searches only those IDs under the existing ownership predicate, and saves selection plus both messages in the final transaction. Selection updates lock and touch the conversation so the existing generation conflict check prevents overwriting a concurrent selection change. External model calls remain outside transactions. Historic answer evidence remains in `message_sources`, independently of current selections and document deletion.

@@ -39,7 +39,7 @@ The already-running host Ollama must have both models. Neither Spring AI nor the
 
 1. Open http://localhost:5173 and sign in again after the backend restart.
 2. In **Documents**, select a PDF/DOC/DOCX file (maximum 10 MiB) or UTF-8 `.txt`/`.md` file (maximum 64 KiB) and choose **Upload and index**. Wait for success. Only then does the document appear in the indexed list.
-3. In **Chat**, enable **Search my documents**, then ask a self-contained question about the file.
+3. In **Chat**, enable **Search selected documents**, expand **Select documents** and choose the files to search, then ask a self-contained question about the file.
 4. Expand the numbered source excerpts beneath the answer. These are retrieved evidence, not an assertion that every generated statement is correct.
 5. Reload the conversation: its answer and source snapshots remain available.
 6. Disable document search for general chat. Deleting a document removes its chunks from subsequent retrieval, but existing chat excerpts remain as historical snapshots.
@@ -91,7 +91,7 @@ The support escalation mailbox is juniper-support@example.test.
 | Ask “Who owns the launch?” | Morgan, grounded in the fixture |
 | Ask “What is the launch budget?” | Explicitly unknown from these documents; no invented budget |
 | Ask from a second account with no documents | No matching sources; no other account's passage returned |
-| Delete the fixture, then ask again in document mode | No matches; previous conversation snapshots remain visible |
+| Delete the selected fixture | Unavailable chip; sending blocked until an available source is selected; previous excerpts remain visible |
 | Disable document search | Normal Ollama general chat |
 
 A similarity threshold is a heuristic, not an answer-confidence score. Tune it with representative documents and questions; low thresholds may retrieve irrelevant passages, high thresholds may miss useful ones. Hybrid search, reranking, OCR, streaming, formal evaluation runs and document versioning remain future work.

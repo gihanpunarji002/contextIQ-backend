@@ -45,6 +45,14 @@ public class DocumentRepository {
     }
 
     public List<Source> search(UUID owner, String model, float[] vector, double threshold) {
+        return search(owner, model, vector, threshold, null);
+    }
+
+    public List<Source> search(UUID owner, String model, float[] vector, double threshold, List<UUID> selected) {
+        if (selected != null && selected.isEmpty()) return List.of();
+        String scope = selected == null ? "" : " AND d.id IN (" + String.join(",", Collections.nCopies(selected.size(), "?")) + ")";
+        var args = new ArrayList<Object>(List.of(EmbeddingService.vectorLiteral(vector), owner, model, EmbeddingService.vectorLiteral(vector), threshold));
+        if (selected != null) args.addAll(selected);
         // Ownership is part of the SQL predicate, before ranking/limiting. Never search other accounts.
         return jdbc.query("""
                 SELECT d.id AS document_id, c.id AS chunk_id, d.filename, c.chunk_index, c.content,
@@ -52,11 +60,10 @@ public class DocumentRepository {
                 FROM document_chunks c JOIN documents d ON d.id = c.document_id
                 WHERE d.owner_id = ? AND d.embedding_model = ?
                   AND 1 - (c.embedding <=> CAST(? AS vector)) >= ?
-                ORDER BY score DESC, c.id LIMIT 4
-                """, (rs, row) -> new Source(rs.getObject("document_id", UUID.class),
+                """ + scope + " ORDER BY score DESC, c.id LIMIT 4", (rs, row) -> new Source(rs.getObject("document_id", UUID.class),
                 rs.getObject("chunk_id", UUID.class), rs.getString("filename"), rs.getInt("chunk_index"),
                 rs.getString("content"), rs.getDouble("score")),
-                EmbeddingService.vectorLiteral(vector), owner, model, EmbeddingService.vectorLiteral(vector), threshold);
+                args.toArray());
     }
 
     public void saveSources(UUID message, List<Source> sources) {

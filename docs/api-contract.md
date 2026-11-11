@@ -100,7 +100,7 @@ Example document/list item:
 The existing `POST /api/v1/chat/messages` accepts optional `useDocuments` (omitted/null/false means general chat):
 
 ```json
-{"message":"When does Project Juniper launch?","useDocuments":true}
+{"message":"When does Project Juniper launch?","useDocuments":true,"documentIds":["<owned-document-uuid>"]}
 ```
 
 The response retains all previous fields and adds `retrievalUsed` and `sources`. History messages expose the same two fields. Source ordering matches the context's `[1]`, `[2]`, etc. Source content is a snapshot, not a live document download.
@@ -130,3 +130,26 @@ The response retains all previous fields and adds `retrievalUsed` and `sources`.
 This is an illustrative response; real token counts, answers and similarity vary. `chunkIndex` is zero-based. Similarity is a retrieval score, not confidence in the generated answer. Up to four owner-filtered source passages are returned. No relevant sources returns a persisted explicit no-evidence answer with `retrievalUsed=true`, `sources=[]`, `model=null`, token counts zero and no Gemma call. `mode=OLLAMA` identifies the selected provider path, not proof that generation occurred. MOCK provider + `useDocuments=true` returns **503**. Retrieval/embedding failure does not silently fall back to general chat. Grounded mode uses the current question, not prior chat turns; ask self-contained questions.
 
 `GET /api/v1/ai/status` now also returns `documentSearch: true` for the Ollama adapter (`false` for MOCK). This advertises capability, not a live embedding/database health check. The UI keeps document search disabled if the field is absent, preventing a newer frontend from treating an older backend as RAG-capable.
+
+
+## Saved conversation document selection
+
+`GET /api/v1/chat/conversations/{id}/documents` returns the owned conversation's saved search mode and ordered selection:
+
+```json
+{"useDocuments":true,"documents":[{"id":"<document-uuid>","filename":"launch.pdf","available":true}]}
+```
+
+`POST /api/v1/chat/conversations/{id}/documents` replaces the selection immediately (session + CSRF required):
+
+```json
+{"useDocuments":true,"documentIds":["<document-uuid>","<another-document-uuid>"]}
+```
+
+Both fields are required on this selection endpoint. At most 50 non-null UUIDs; duplicates are collapsed. Empty IDs explicitly clear the selection. Unknown/foreign conversations or new unknown/foreign document IDs return **404**. Malformed IDs, missing fields, null list elements or more than 50 IDs return **400**. Previously saved deleted IDs may be retained and return `available:false` with their saved filename. Removing such an ID discards that tombstone; it cannot subsequently be re-added.
+
+Chat POST also accepts optional `documentIds` with the same validation. Omitted/null retains existing selection (empty for a new conversation); `[]` clears it. `useDocuments` omitted/null/false remains general chat. The selection and mode are committed atomically with a successful turn, including no-evidence responses. A provider failure does not save a new conversation or selection from that send. Existing conversation selection can be saved independently using the endpoint above.
+
+Retrieval is restricted to the selected, still-available document IDs **and** account ownership before ranking and limiting; it never falls back to the entire library. An empty/unavailable-only selection returns a no-evidence response without calling the embedding model or LLM; the UI requires at least one available selection before sending in document mode. Old conversations start with general chat and no selection. Switching to general chat retains the selected IDs for later reuse. Concurrent selection changes while generating an answer cause **409**, preventing a stale reply from overwriting the newer selection.
+
+Existing message `sources` are immutable evidence snapshots. Expand a source beneath an answer to inspect its excerpt and retrieval score, including after deleting the original document. Deletion removes the indexed document and chunks, not historic evidence. `GET /api/v1/ai/status` includes `documentSelection:true`; the frontend blocks sending against an older backend to avoid silently ignoring the requested scope.

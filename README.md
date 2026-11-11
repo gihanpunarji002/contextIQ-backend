@@ -122,3 +122,12 @@ Phase 3 adds opt-in grounded chat using documents owned by the signed-in account
 `AI_MODE` defaults to `OLLAMA` (`MOCK` for offline demos). `OLLAMA_MODEL` defaults to `gemma4:e2b`. Java on the Mac uses `OLLAMA_BASE_URL=http://localhost:11434`; Compose uses `OLLAMA_DOCKER_BASE_URL=http://host.docker.internal:11434`. Output/context defaults are 1200/16384 tokens. No API key is required. See [setup instructions](docs/phase-2-ollama.md).
 
 PDF and Word extraction uses Spring AI `TikaDocumentReader` with Apache Tika. See [file support, limits and rollout](docs/tika-ingestion.md). No database migration is needed for this reader extension.
+
+
+### Saved document scope in chat
+
+Enable **Search selected documents**, expand **Select documents**, and choose one or several indexed files. Chips appear above the composer. New-chat selections save with the first successful message; existing-chat changes save immediately. Reloading or reopening a conversation restores both the selection and search mode. Deleted sources stay labelled **Unavailable (deleted)** and are excluded from retrieval. Expand a numbered source below an answer to inspect the saved evidence excerpt.
+
+This update adds Flyway **V6**. Apply it by rebuilding/recreating only your backend through your normal Docker workflow (`docker compose up -d --build --force-recreate --no-deps backend` from the backend directory). No database recreation is needed when Phase 3/pgvector is already running. The frontend blocks sending until the backend advertises the new selection capability. No services are restarted automatically by this change.
+
+Selection endpoints: `GET` and `POST /api/v1/chat/conversations/{id}/documents`; see [API contract](docs/api-contract.md). Verify by selecting two files, asking a question, reloading, and expanding the answer's source. Deleting one selected file should leave its unavailable chip; an empty or unavailable-only scope never searches other files.
