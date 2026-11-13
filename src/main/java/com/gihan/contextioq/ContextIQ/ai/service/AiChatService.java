@@ -26,6 +26,8 @@ public interface AiChatService {
   }
 
   Reply reply(List<Turn> history);
+  /** Identity is application configuration, not evidence to retrieve from user documents. */
+  default boolean isIdentityQuestion(String question) { return false; }
   default Reply groundedReply(String question, java.util.List<com.gihan.contextioq.ContextIQ.rag.Source> sources) {
     throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
       "Document chat requires the Ollama provider.");

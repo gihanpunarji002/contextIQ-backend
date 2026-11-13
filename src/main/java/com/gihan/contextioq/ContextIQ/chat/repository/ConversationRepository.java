@@ -14,6 +14,9 @@ public interface ConversationRepository
   )
   Optional<Conversation> findForUpdateById(UUID id, UUID ownerId);
 
+  List<Conversation> findByOwnerIdAndWorkspaceId(UUID ownerId, UUID workspaceId, org.springframework.data.domain.Sort sort);
+  boolean existsByIdAndOwnerIdAndWorkspaceId(UUID id, UUID ownerId, UUID workspaceId);
+
   List<Conversation> findByOwnerId(
     UUID ownerId,
     org.springframework.data.domain.Sort sort

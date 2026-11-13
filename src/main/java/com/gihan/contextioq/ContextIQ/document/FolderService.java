@@ -1,7 +1,6 @@
 package com.gihan.contextioq.ContextIQ.document;
-
-import com.gihan.contextioq.ContextIQ.auth.service.CurrentUser;
 import com.gihan.contextioq.ContextIQ.document.FolderDtos.*;
+import com.gihan.contextioq.ContextIQ.workspace.WorkspaceAccess;
 import java.util.*;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -11,36 +10,27 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class FolderService {
-    private final FolderRepository folders;
-    private final CurrentUser current;
-    public FolderService(FolderRepository folders, CurrentUser current) { this.folders = folders; this.current = current; }
-    public List<FolderView> list() { return folders.list(current.get().getId()); }
-
-    @Transactional
-    public FolderView save(UUID id, FolderRequest input) {
-        UUID owner = current.get().getId();
-        String name = input.name().strip();
-        if (name.isBlank() || name.chars().anyMatch(Character::isISOControl))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Use a folder name without control characters.");
-        var request = new FolderRequest(name, input.icon(), input.color());
-        try {
-            if (id == null) return folders.create(owner, request);
-            if (!folders.update(id, owner, request)) throw missing("Folder");
-            return folders.list(owner).stream().filter(f -> f.id().equals(id)).findFirst().orElseThrow();
-        } catch (DuplicateKeyException e) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "A folder with this name already exists.");
+    private final FolderRepository folders; private final WorkspaceAccess access;
+    public FolderService(FolderRepository folders,WorkspaceAccess access) { this.folders=folders;this.access=access; }
+    public List<FolderView> list() { return folders.list(access.current().workspaceId()); }
+    @Transactional public FolderView save(UUID id,FolderRequest input) {
+        var scope=access.lock(access.current());scope.edit();UUID workspace=scope.workspaceId();
+        String name=input.name().strip();
+        if(name.isBlank()||name.chars().anyMatch(Character::isISOControl))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Use a folder name without control characters.");
+        if(input.parentId()!=null) {
+            if(!folders.exists(input.parentId(),workspace))throw WorkspaceAccess.missing();
+            if(id!=null && folders.descendants(workspace,List.of(id)).contains(input.parentId()))throw new ResponseStatusException(HttpStatus.CONFLICT,"A folder cannot be placed inside itself or its descendants");
         }
+        var request=new FolderRequest(name,input.icon(),input.color(),input.parentId());
+        try {
+            if(id==null)return folders.create(scope,request);
+            if(!folders.update(id,workspace,request))throw WorkspaceAccess.missing();
+            return folders.list(workspace).stream().filter(f->f.id().equals(id)).findFirst().orElseThrow();
+        } catch(DuplicateKeyException e) { throw new ResponseStatusException(HttpStatus.CONFLICT,"A folder with this name already exists in this workspace"); }
     }
-
-    @Transactional
-    public void move(MoveRequest request) {
-        UUID owner = current.get().getId();
-        if (request.folderId() != null && !folders.exists(request.folderId(), owner)) throw missing("Folder");
-        // All moves roll back if even one document is unavailable or belongs to another account.
-        for (UUID document : new LinkedHashSet<>(request.documentIds()))
-            if (!folders.move(document, owner, request.folderId())) throw missing("Document");
-    }
-    private ResponseStatusException missing(String kind) {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, kind + " not found");
+    @Transactional public void move(MoveRequest request) {
+        var scope=access.lock(access.current());scope.edit();
+        if(request.folderId()!=null&&!folders.exists(request.folderId(),scope.workspaceId()))throw WorkspaceAccess.missing();
+        for(UUID doc:new LinkedHashSet<>(request.documentIds()))if(!folders.move(doc,scope.workspaceId(),request.folderId()))throw WorkspaceAccess.missing();
     }
 }

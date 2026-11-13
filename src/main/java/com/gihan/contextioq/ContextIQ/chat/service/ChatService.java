@@ -21,6 +21,7 @@ public class ChatService {
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
     private final ConversationRepository conversations;
     private final ConversationDocuments selections;
+    private final com.gihan.contextioq.ContextIQ.workspace.WorkspaceAccess access;
     private final MessageRepository messages;
     private final AiChatService ai;
     private final com.gihan.contextioq.ContextIQ.rag.RetrievalService retrieval;
@@ -31,6 +32,7 @@ public class ChatService {
     public ChatService(
             ConversationRepository c,
             ConversationDocuments selections,
+            com.gihan.contextioq.ContextIQ.workspace.WorkspaceAccess access,
             MessageRepository m,
             AiChatService ai,
             com.gihan.contextioq.ContextIQ.auth.service.CurrentUser current,
@@ -40,6 +42,7 @@ public class ChatService {
     ) {
         conversations = c;
         this.selections = selections;
+        this.access = access;
         messages = m;
         this.ai = ai;
         this.retrieval = retrieval;
@@ -58,18 +61,19 @@ public class ChatService {
     }
 
     public SendResponse send(SendRequest request) {
-        UUID owner = current.get().getId();
+        var scope = access.current();
+        UUID owner = scope.userId();
         String text = request.message().strip();
         Snapshot snapshot = transactions.execute(status -> {
             if (request.conversationId() == null) return new Snapshot(
                     null,
                     null,
                     List.of(),
-                    selections.resolve(null, owner, request.useDocuments(), request.documentIds(), request.folderIds())
+                    selections.resolve(null, scope.workspaceId(), request.useDocuments(), request.documentIds(), request.folderIds())
             );
             var conversation = conversations
                     .findById(request.conversationId())
-                    .filter(c -> owner.equals(c.getOwnerId()))
+                    .filter(c -> owner.equals(c.getOwnerId()) && scope.workspaceId().equals(c.getWorkspaceId()))
                     .orElseThrow(this::notFound);
             var recent = new ArrayList<>(
                     messages.findTop20ByConversationIdOrderByCreatedAtDescIdDesc(
@@ -104,7 +108,7 @@ public class ChatService {
                     conversation.getId(),
                     conversation.getUpdatedAt(),
                     List.copyOf(context),
-                    selections.resolve(conversation.getId(), owner, request.useDocuments(), request.documentIds(), request.folderIds())
+                    selections.resolve(conversation.getId(), scope.workspaceId(), request.useDocuments(), request.documentIds(), request.folderIds())
             );
         });
         var input = new ArrayList<>(snapshot.history());
@@ -113,23 +117,26 @@ public class ChatService {
         if (request.useDocuments() && !"OLLAMA".equals(ai.status().mode())) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Document chat requires Ollama. Switch the backend to OLLAMA.");
         }
-        var sources = request.useDocuments() ? retrieval.retrieve(owner, text, snapshot.context().documents().stream().filter(SelectedDocument::available).map(SelectedDocument::id).toList(),
+        boolean retrievalUsed = request.useDocuments() && !ai.isIdentityQuestion(text);
+        var sources = retrievalUsed ? retrieval.retrieveScoped(scope, text, snapshot.context().documents().stream().filter(SelectedDocument::available).map(SelectedDocument::id).toList(),
                 snapshot.context().folders().stream().filter(f -> f.available() && f.documentCount() > 0).map(SelectedFolder::id).toList())
                 : java.util.List.<com.gihan.contextioq.ContextIQ.rag.Source>of();
         AiChatService.Reply reply;
-        if (!request.useDocuments()) reply = ai.reply(List.copyOf(input));
+        if (!retrievalUsed) reply = ai.reply(List.copyOf(input));
         else if (sources.isEmpty()) reply = new AiChatService.Reply(
                 "I couldn't find relevant passages in your documents. Select available documents or ask a more specific question.",
                 "OLLAMA", null, 0, 0);
         else reply = ai.groundedReply(text, sources);
         return transactions.execute(status -> {
+            access.lock(scope);
             Conversation c;
             if (snapshot.id() == null) c = conversations.save(
-                    new Conversation(text.substring(0, Math.min(120, text.length())), owner)
+                    new Conversation(text.substring(0, Math.min(120, text.length())), owner, scope.workspaceId(), scope.organizationId())
             );
             else {
                 c = conversations
                         .findForUpdateById(snapshot.id(), owner)
+                        .filter(item -> scope.workspaceId().equals(item.getWorkspaceId()))
                         .orElseThrow(this::notFound);
                 if (
                         !c.getUpdatedAt().equals(snapshot.updatedAt())
@@ -154,7 +161,7 @@ public class ChatService {
                     time.plusNanos(1000)
             );
             assistant.setProvider(reply);
-            assistant.setRetrievalUsed(request.useDocuments());
+            assistant.setRetrievalUsed(retrievalUsed);
             messages.saveAndFlush(assistant);
             documents.saveSources(assistant.getId(), sources);
             selections.save(c.getId(), snapshot.context());
@@ -173,7 +180,7 @@ public class ChatService {
                     reply.model(),
                     reply.inputTokens(),
                     reply.outputTokens(),
-                    request.useDocuments(),
+                    retrievalUsed,
                     sources
             );
         });
@@ -181,16 +188,18 @@ public class ChatService {
 
     @Transactional(readOnly = true)
     public DocumentContext documentContext(UUID id) {
-        UUID owner = current.get().getId();
-        if (!conversations.existsByIdAndOwnerId(id, owner)) throw notFound();
-        return selections.get(id, owner);
+        var scope = access.current();
+        UUID owner = scope.userId();
+        if (!conversations.existsByIdAndOwnerIdAndWorkspaceId(id, owner, scope.workspaceId())) throw notFound();
+        return selections.get(id, scope.workspaceId());
     }
 
     @Transactional
     public DocumentContext selectDocuments(UUID id, DocumentSelection request) {
-        UUID owner = current.get().getId();
-        var c = conversations.findForUpdateById(id, owner).orElseThrow(this::notFound);
-        var context = selections.resolve(id, owner, request.useDocuments(), request.documentIds(), request.folderIds());
+        var scope = access.lock(access.current());
+        UUID owner = scope.userId();
+        var c = conversations.findForUpdateById(id, owner).filter(item -> scope.workspaceId().equals(item.getWorkspaceId())).orElseThrow(this::notFound);
+        var context = selections.resolve(id, scope.workspaceId(), request.useDocuments(), request.documentIds(), request.folderIds());
         selections.save(id, context);
         Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         c.touch(now.isAfter(c.getUpdatedAt()) ? now : c.getUpdatedAt().plusNanos(1000));
@@ -206,9 +215,10 @@ public class ChatService {
 
     @Transactional(readOnly = true)
     public List<ConversationView> conversations() {
+        var scope = access.current();
         return conversations
-                .findByOwnerId(
-                        current.get().getId(),
+                .findByOwnerIdAndWorkspaceId(
+                        scope.userId(), scope.workspaceId(),
                         Sort.by(Sort.Direction.DESC, "updatedAt").and(Sort.by("id"))
                 )
                 .stream()
@@ -218,8 +228,9 @@ public class ChatService {
 
     @Transactional(readOnly = true)
     public List<MessageView> history(UUID id) {
+        var scope = access.current();
         if (
-                !conversations.existsByIdAndOwnerId(id, current.get().getId())
+                !conversations.existsByIdAndOwnerIdAndWorkspaceId(id, scope.userId(), scope.workspaceId())
         ) throw new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Conversation not found"

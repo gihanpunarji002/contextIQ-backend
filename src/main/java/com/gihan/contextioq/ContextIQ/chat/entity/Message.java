@@ -14,6 +14,8 @@ public class Message {
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(name = "conversation_id", nullable = false)
   private Conversation conversation;
+  private UUID workspaceId;
+  private UUID organizationId;
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 20)
@@ -75,6 +77,8 @@ public class Message {
   ) {
     id = UUID.randomUUID();
     conversation = c;
+    workspaceId = c.getWorkspaceId();
+    organizationId = c.getOrganizationId();
     this.role = role;
     this.content = content;
     createdAt = time;

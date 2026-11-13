@@ -12,6 +12,8 @@ public class Conversation {
   private UUID id;
 
   private UUID ownerId;
+  private UUID workspaceId;
+  private UUID organizationId;
 
   @Column(nullable = false, length = 120)
   private String title;
@@ -25,6 +27,12 @@ public class Conversation {
   protected Conversation() {}
 
   public Conversation(String title, UUID ownerId) {
+    this(title, ownerId, ownerId, ownerId);
+  }
+
+  public Conversation(String title, UUID ownerId, UUID workspaceId, UUID organizationId) {
+    this.workspaceId = workspaceId;
+    this.organizationId = organizationId;
     this.id = UUID.randomUUID();
     this.ownerId = ownerId;
     this.title = title;
@@ -39,6 +47,9 @@ public class Conversation {
   public UUID getId() {
     return id;
   }
+
+  public UUID getWorkspaceId() { return workspaceId; }
+  public UUID getOrganizationId() { return organizationId; }
 
   public UUID getOwnerId() {
     return ownerId;

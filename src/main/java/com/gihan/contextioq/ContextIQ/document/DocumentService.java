@@ -13,6 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class DocumentService {
     private final FolderRepository folders;
+    private final com.gihan.contextioq.ContextIQ.workspace.WorkspaceAccess access;
     private final CurrentUser current;
     private final DocumentRepository documents;
     private final TextChunker chunker;
@@ -21,8 +22,9 @@ public class DocumentService {
     private final TransactionTemplate transactions;
 
     public DocumentService(CurrentUser current, DocumentRepository documents, TextChunker chunker,
-                           EmbeddingService embeddings, PlatformTransactionManager manager, DocumentTextExtractor extractor, FolderRepository folders) {
+                           EmbeddingService embeddings, PlatformTransactionManager manager, DocumentTextExtractor extractor, FolderRepository folders, com.gihan.contextioq.ContextIQ.workspace.WorkspaceAccess access) {
         this.current = current;
+        this.access = access;
         this.folders = folders;
         this.documents = documents;
         this.chunker = chunker;
@@ -31,12 +33,13 @@ public class DocumentService {
         this.transactions = new TransactionTemplate(manager);
     }
 
-    public List<DocumentView> list() { return documents.list(current.get().getId()); }
+    public List<DocumentView> list() { return documents.list(access.current().workspaceId()); }
 
     public DocumentView upload(MultipartFile file) { return upload(file, null); }
 
     public DocumentView upload(MultipartFile file, UUID folderId) {
-        UUID owner = current.get().getId();
+        var scope = access.current(); scope.edit();
+        UUID owner = scope.workspaceId();
         requireFolder(folderId, owner);
         String name = Optional.ofNullable(file.getOriginalFilename()).orElse("")
                 .replace('\\', '/');
@@ -49,10 +52,11 @@ public class DocumentService {
         var vectors = embeddings.documents(chunks);
         String filename = name;
         return transactions.execute(status -> {
+            access.lock(scope).edit();
             requireFolder(folderId, owner);
-            var doc = documents.insert(owner, filename, file.getSize(), embeddings.model(), chunks, vectors);
+            var doc = documents.insert(scope, filename, file.getSize(), embeddings.model(), chunks, vectors);
             if (folderId != null) folders.move(doc.id(), owner, folderId);
-            return new DocumentView(doc.id(), doc.filename(), doc.sizeBytes(), doc.chunkCount(), doc.embeddingModel(), doc.createdAt(), folderId);
+            return new DocumentView(doc.id(), doc.filename(), doc.sizeBytes(), doc.chunkCount(), doc.embeddingModel(), doc.createdAt(), folderId, scope.workspaceId(), scope.userId());
         });
     }
 
@@ -60,8 +64,10 @@ public class DocumentService {
         if (id != null && !folders.exists(id, owner)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Folder not found");
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public void delete(UUID id) {
-        if (!documents.delete(id, current.get().getId()))
+        var scope = access.lock(access.current()); scope.edit();
+        if (!documents.delete(id, scope.workspaceId()))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found");
     }
 

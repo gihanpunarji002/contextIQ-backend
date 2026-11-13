@@ -53,3 +53,9 @@ V7 adds `document_folders`, nullable `documents.folder_id`, an owner/folder inde
 Chat retains explicit document IDs and selected folder IDs separately. Retrieval applies `owner AND model AND threshold AND (selected file OR selected folder)` before ordering and the four-passage limit. Folder membership is resolved by the SQL query; it is not copied into a potentially stale list of file IDs. Sources in saved answers remain immutable snapshots. Empty scopes never fall back to the whole library. UI source selection uses separate folder and individual-file views, with folder filtering in the latter.
 
 The first folder implementation is deliberately flat and single-parent. Folder deletion, nested folders, multiple-folder tags, sharing and tenant-level folder permissions remain outside this change. As with the existing document library, lists are unpaginated; server-side pagination/search should precede large-library deployment.
+
+### Workspace tenancy supersedes account-only document ownership
+
+The current authorization boundary is an organization-consistent workspace, implemented by `workspace.WorkspaceAccess` and `workspace.WorkspaceService`. Account-only statements above describe earlier phases. Shared document/folder operations now use workspace scope; `owner_id` retains creator attribution. Conversations require both authorship and current workspace access. All retrieval and source histories enforce that boundary on the server.
+
+V8 supplies composite tenant FKs, nested folder relationships, membership role/version records, creator membership references and a persistent resource registry for deleted-source tombstones. The frontend scopes requests and caches to the active workspace, but this is not the authorization mechanism. See [workspaces.md](workspaces.md) for the full current model, role matrix, migration and remaining limitations.

@@ -36,14 +36,16 @@ public final class ChatDtos {
     UUID id,
     String title,
     Instant createdAt,
-    Instant updatedAt
+    Instant updatedAt,
+    UUID workspaceId,
+    UUID createdBy
   ) {
     public static ConversationView from(Conversation c) {
       return new ConversationView(
         c.getId(),
         c.getTitle(),
         c.getCreatedAt(),
-        c.getUpdatedAt()
+        c.getUpdatedAt(), c.getWorkspaceId(), c.getOwnerId()
       );
     }
   }

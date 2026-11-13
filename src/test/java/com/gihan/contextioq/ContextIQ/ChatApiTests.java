@@ -19,6 +19,12 @@ class ChatApiTests {
   MockMvc mvc;
 
   @Autowired
+  com.gihan.contextioq.ContextIQ.workspace.WorkspaceAccess access;
+
+  @Autowired
+  com.gihan.contextioq.ContextIQ.document.DocumentRepository documents;
+
+  @Autowired
   org.springframework.jdbc.core.JdbcTemplate jdbc;
 
   @Autowired
@@ -45,6 +51,7 @@ class ChatApiTests {
     jdbc.update(
       "INSERT INTO app_users(id,first_name,last_name,email,password_hash,created_at) SELECT '10000000-0000-0000-0000-000000000001','Test','User','chat-test@example.com','test-only-hash',CURRENT_TIMESTAMP WHERE NOT EXISTS (SELECT 1 FROM app_users WHERE id='10000000-0000-0000-0000-000000000001')"
     );
+    access.ensurePersonal(java.util.UUID.fromString("10000000-0000-0000-0000-000000000001"));
   }
 
   @Autowired
@@ -56,8 +63,10 @@ class ChatApiTests {
     var conversation = conversations.saveAndFlush(new com.gihan.contextioq.ContextIQ.chat.entity.Conversation("Selection test", owner));
     var first = java.util.UUID.randomUUID();
     var second = java.util.UUID.randomUUID();
-    for (var doc : java.util.List.of(first, second)) jdbc.update(
-      "INSERT INTO documents (id, owner_id, filename, size_bytes, chunk_count, embedding_model, created_at) VALUES (?, ?, ?, 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, owner, doc + ".txt");
+    for (var doc : java.util.List.of(first, second)) {
+      jdbc.update("INSERT INTO workspace_resources VALUES (?, ?, ?)",doc,owner,owner);
+      jdbc.update("INSERT INTO documents (id,owner_id,filename,size_bytes,chunk_count,embedding_model,created_at,workspace_id,organization_id) VALUES (?, ?, ?, 10, 1, 'nomic', CURRENT_TIMESTAMP, ?, ?)",doc,owner,doc+".txt",owner,owner);
+    }
     String route = "/api/v1/chat/conversations/" + conversation.getId() + "/documents";
     String body = "{\"useDocuments\":true,\"documentIds\":[\"" + first + "\",\"" + second + "\"]}";
     mvc.perform(post(route).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
@@ -88,6 +97,7 @@ class ChatApiTests {
   void otherAccountsCannotReadOrChangeSelectionsOrSelectForeignDocuments() throws Exception {
     var other = java.util.UUID.randomUUID();
     jdbc.update("INSERT INTO app_users(id,first_name,last_name,email,password_hash,created_at) VALUES (?, 'Other', 'User', ?, 'test', CURRENT_TIMESTAMP)", other, other + "@example.com");
+    access.ensurePersonal(other);
     var foreignConversation = conversations.saveAndFlush(new com.gihan.contextioq.ContextIQ.chat.entity.Conversation("Private", other));
     String route = "/api/v1/chat/conversations/" + foreignConversation.getId() + "/documents";
     mvc.perform(get(route)).andExpect(status().isNotFound());
@@ -95,7 +105,8 @@ class ChatApiTests {
       .contentType(MediaType.APPLICATION_JSON).content("{\"useDocuments\":false,\"documentIds\":[]}"))
       .andExpect(status().isNotFound());
     var doc = java.util.UUID.randomUUID();
-    jdbc.update("INSERT INTO documents (id, owner_id, filename, size_bytes, chunk_count, embedding_model, created_at) VALUES (?, ?, 'private.txt', 10, 1, 'nomic', CURRENT_TIMESTAMP)", doc, other);
+    jdbc.update("INSERT INTO workspace_resources VALUES (?, ?, ?)",doc,other,other);
+    jdbc.update("INSERT INTO documents (id,owner_id,filename,size_bytes,chunk_count,embedding_model,created_at,workspace_id,organization_id) VALUES (?, ?, 'private.txt', 10, 1, 'nomic', CURRENT_TIMESTAMP, ?, ?)",doc,other,other,other);
     mvc.perform(post("/api/v1/chat/messages").with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
       .contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"Hi\",\"documentIds\":[\"" + doc + "\"]}"))
       .andExpect(status().isNotFound());

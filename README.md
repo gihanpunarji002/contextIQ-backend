@@ -151,3 +151,24 @@ docker compose up -d --build --force-recreate --no-deps backend
 Refresh the frontend afterwards. No database recreation or model changes are required. Until rebuilt, the current backend cannot serve folder routes; the UI keeps existing documents accessible and disables folder-scoped chat. The implementation does not automatically start/restart services.
 
 Regression tests cover folder validation and ownership, atomic moves, upload assignment, saved chat folders, changing membership and retrieval union/deduplication. The retrieval-scope SQL test substitutes distance arithmetic under H2; it verifies filters and limits, not native pgvector distance calculations. Live PostgreSQL/Ollama verification remains a manual rollout check.
+
+
+### Assistant identity
+
+The Ollama adapter uses the product identity **Zipzipy AI 1.0**, built by **Gihan Punarji, a Software Engineer at Zipzipy Pvt Ltd**. The shared system prompt applies to general and grounded chat. Direct standalone identity questions (including “Who are you?” and “Who built you?”) use general generation even when document search is enabled; the saved source selection stays intact, but the identity answer has `retrievalUsed:false` and no citations. Questions about document authors still use retrieval.
+
+This is system-prompt customization, not weight fine-tuning or a new foundation model. The underlying Ollama model and accurate provider/token metadata are unchanged. Explicit technical questions about the base model can still be answered honestly. Existing saved messages are not rewritten. Rebuild the backend to load the new prompt; no migration or model download is needed.
+
+Optional identity smoke test against an already-running local `gemma4:e2b`:
+
+```sh
+CONTEXTIQ_IDENTITY_SMOKE=true ./mvnw -Dtest=AssistantIdentityLiveTests test
+```
+
+### Organizations and workspaces (V8)
+
+The application now supports organizations with multiple independent workspaces, Admin/Editor/Viewer membership, nested folders, workspace-scoped documents and private workspace-bound conversations. Access is checked in the backend and in vector retrieval SQL. Existing content migrates into each user's private Personal workspace without re-embedding.
+
+Start at **Workspaces**: create an organization, create its workspaces, add registered accounts to the organization, then assign workspace roles through **Members**. Organization membership alone does not grant workspace knowledge access. The detail page provides **Overview, Knowledge, Assistant, Members, Settings**. New folder forms include a parent selector; chat folder scope includes descendants.
+
+This is a schema migration: back up PostgreSQL, rebuild the backend, and refresh the frontend. The existing frontend now requires the workspace endpoints. See [workspace setup, permissions, API behavior and migration checks](docs/workspaces.md). No services are started automatically. Membership uses existing accounts; email invitations and fine-grained document grants are deferred.

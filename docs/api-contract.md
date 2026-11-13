@@ -202,3 +202,36 @@ Example mixed scope:
 Folders and individual files are a **union**, constrained by account ownership and embedding model before ranking/limiting. Each chunk is returned once even if its document is selected both ways. A folder searches current membership at query time: additions and moves affect future answers; previously saved source excerpts are unchanged. Explicit files remain selected even if moved. Empty folders do not broaden the search. Empty/unavailable-only scope returns no evidence; the UI disables sending until a non-empty source is selected. Folder selections persist with the conversation; names/counts refresh on read.
 
 `GET /api/v1/ai/status` includes `folderSelection:true`. The frontend offers folder selection only when advertised; individual-file selection remains usable with the previous document-selection backend. Folder deletion, nesting and multi-folder membership are not implemented in this version.
+
+## Organizations and workspace scope (V8)
+
+All existing document, folder and chat endpoints now accept `X-Workspace-Id`. The server requires active membership; omission selects the caller's private Personal workspace. Reads require any workspace role, knowledge mutations require Editor/Admin. Conversation reads/updates additionally require authorship. Header parsing failure is **400**, inaccessible workspaces/resources **404**, and insufficient mutation privileges **403**. Session/CSRF protections still apply.
+
+`DocumentView`, folder views and conversation views now expose `workspaceId` and `createdBy`. Folder create/update accepts optional `parentId` (null = workspace root). A foreign-workspace parent returns 404; a self/descendant cycle returns **409**. Folder search/counts include descendants. Folder names must be unique within a workspace.
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /api/v1/organizations` | List caller's active organization memberships: `id,name,role` |
+| `POST /api/v1/organizations` | `{ "name":"Acme" }`; creates organization and Admin membership; **201** |
+| `GET /api/v1/organizations/{id}/members` | Organization Admin-only roster |
+| `POST /api/v1/organizations/{id}/members` | `{ "email":"registered@example.com" }`; adds an existing account as organization MEMBER, **204**. Does not grant organization Admin or workspace access |
+| `POST /api/v1/organizations/{id}/workspaces` | Organization Admin-only; `{ "name":"HR","description":"HR policies" }`; **201** |
+| `GET /api/v1/workspaces` | List accessible active workspaces and real document/folder/member counts |
+| `GET /api/v1/workspaces/{id}` | Workspace details, requiring membership |
+| `POST /api/v1/workspaces/{id}` | Admin-only name/description update; **200** |
+| `DELETE /api/v1/workspaces/{id}` | Admin-only soft deletion; **204**; personal workspace deletion **409** |
+| `GET /api/v1/workspaces/{id}/members` | Workspace Admin-only roster |
+| `POST /api/v1/workspaces/{id}/members` | Admin-only `{ "email":"registered@example.com","role":"VIEWER" }`; add/update membership, **204** |
+| `DELETE /api/v1/workspaces/{id}/members/{userId}` | Admin-only access revocation, **204** |
+
+Workspace roles are `ADMIN`, `EDITOR`, `VIEWER`. Adding a workspace member who is not an active organization member returns **409**. Unknown registered accounts return **404**. Last-Admin removal/demotion, sharing Personal workspaces, and duplicate workspace/folder names return **409**. Invalid DTOs return **400**. No invitations or emails are sent by these endpoints.
+
+Workspace response example:
+
+```json
+{"id":"<workspace-uuid>","organizationId":"<organization-uuid>","organizationName":"Acme","name":"HR","description":"HR policies","role":"EDITOR","personal":false,"documentCount":12,"folderCount":3,"memberCount":4,"createdBy":"<user-uuid>","createdAt":"2026-11-12T02:00:00Z"}
+```
+
+Member response fields: `userId,firstName,lastName,email,role`. The workspace role version is checked again after generation; revoked access returns **404**, changed role/version **409**, and no generated answer or new turn is persisted. Existing source excerpts stay tenant-scoped through immutable resource references.
+
+See [workspace design and rollout](workspaces.md) for migration, privacy, deletion semantics and test limitations.
